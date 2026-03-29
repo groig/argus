@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PORT="${ARGUS_SCREENSHOT_PORT:-4101}"
+BASE_URL="${ARGUS_SCREENSHOT_BASE_URL:-http://127.0.0.1:${PORT}}"
+MANIFEST_PATH="${ARGUS_SCREENSHOT_MANIFEST_PATH:-/tmp/argus-screenshot-manifest.json}"
+SERVER_LOG="${ARGUS_SCREENSHOT_SERVER_LOG:-/tmp/argus-screenshots-server.log}"
+
+cleanup() {
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+  fi
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+trap cleanup EXIT
+
+require_command mix
+require_command node
+require_command chromium
+require_command chromedriver
+require_command curl
+
+cd "${ROOT_DIR}"
+
+mkdir -p docs/screenshots
+
+mix ecto.create >/dev/null 2>&1 || true
+mix ecto.migrate
+mix assets.build
+
+ARGUS_ISSUE_WEBHOOK_URL="" \
+ARGUS_SCREENSHOT_MANIFEST_PATH="${MANIFEST_PATH}" \
+ARGUS_SCREENSHOT_PASSWORD="${ARGUS_SCREENSHOT_PASSWORD:-screenshots123}" \
+mix run priv/repo/screenshot_seeds.exs
+
+PORT="${PORT}" \
+PHX_SERVER=true \
+ARGUS_SCREENSHOT_MODE=1 \
+ARGUS_ISSUE_WEBHOOK_URL="" \
+mix phx.server >"${SERVER_LOG}" 2>&1 &
+SERVER_PID=$!
+
+for _ in $(seq 1 60); do
+  if curl -fsS "${BASE_URL}/login" >/dev/null 2>&1; then
+    break
+  fi
+
+  sleep 1
+done
+
+curl -fsS "${BASE_URL}/login" >/dev/null
+
+ARGUS_SCREENSHOT_BASE_URL="${BASE_URL}" \
+ARGUS_SCREENSHOT_MANIFEST_PATH="${MANIFEST_PATH}" \
+node "${ROOT_DIR}/scripts/screenshots.mjs"
+
+echo "Screenshots written to ${ROOT_DIR}/docs/screenshots"

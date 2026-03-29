@@ -1,0 +1,22 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <section class="border border-zinc-200 bg-white px-8 py-10 sm:px-10">
+    <div class="space-y-6 text-center">
+      <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-sm border border-zinc-200 bg-zinc-950 text-lg font-semibold text-white">
+        A
+      </div>
+      <div class="space-y-3">
+        <p class="text-xs uppercase tracking-[0.22em] text-zinc-500">Argus</p>
+        <h1 class="text-3xl font-semibold tracking-tight text-zinc-950">Welcome</h1>
+      </div>
+      <div class="flex items-center justify-center">
+        <.button navigate={
+          if @current_scope && @current_scope.user,
+            do: ArgusWeb.UserAuth.signed_in_path(@current_scope.user),
+            else: ~p"/login"
+        }>
+          {if @current_scope && @current_scope.user, do: "Open dashboard", else: "Log in"}
+        </.button>
+      </div>
+    </div>
+  </section>
+</Layouts.app>
