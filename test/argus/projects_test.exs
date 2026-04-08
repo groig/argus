@@ -125,6 +125,42 @@ defmodule Argus.ProjectsTest do
     end
   end
 
+  describe "occurrence queries" do
+    test "lists lightweight occurrence summaries and fetches the selected occurrence separately" do
+      %{project: project} = workspace_fixture()
+      first_seen_at = ~U[2026-03-28 22:00:00Z]
+      latest_seen_at = ~U[2026-03-28 22:10:00Z]
+
+      {:ok, %{issue: _issue}} =
+        Projects.upsert_issue_and_occurrence(
+          project,
+          issue_attrs(first_seen_at),
+          occurrence_attrs("evt-first", first_seen_at)
+        )
+
+      {:ok, %{issue: issue}} =
+        Projects.upsert_issue_and_occurrence(
+          project,
+          %{issue_attrs(latest_seen_at) | last_seen_at: latest_seen_at},
+          occurrence_attrs("evt-latest", latest_seen_at)
+        )
+
+      [latest_summary, first_summary] = Projects.list_occurrence_summaries(issue)
+
+      assert latest_summary.event_id == "evt-latest"
+      assert first_summary.event_id == "evt-first"
+      assert latest_summary.raw_payload == nil
+      assert latest_summary.breadcrumbs == []
+      assert latest_summary.minidump_attachment == nil
+
+      full_occurrence = Projects.get_occurrence(issue, latest_summary.id)
+
+      assert full_occurrence.event_id == latest_summary.event_id
+      assert full_occurrence.raw_payload["request"]["url"] == "https://example.com/jobs/1"
+      assert full_occurrence.breadcrumbs == []
+    end
+  end
+
   defp issue_attrs(timestamp) do
     %{
       fingerprint: "RuntimeError|boom|billing.jobs.sync",

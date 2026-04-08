@@ -320,7 +320,7 @@ defmodule ArgusWeb.IssuesLive.Show do
               <%= if @tab == "events" do %>
                 <div id="issue-events-list" class="space-y-3">
                   <.link
-                    :for={occurrence <- @all_occurrences}
+                    :for={occurrence <- @occurrence_summaries}
                     patch={issue_patch(@project, @issue, "event", occurrence.id, @frame_mode)}
                     class={[
                       "block border px-4 py-4 transition",
@@ -655,12 +655,19 @@ defmodule ArgusWeb.IssuesLive.Show do
   defp assign_page(socket, project, issue, params) do
     tab = parse_tab(Map.get(params, "tab", "event"))
     frame_mode = parse_frame_mode(Map.get(params, "frames", "in_app"))
-    occurrences = Projects.list_all_occurrences(issue)
-    selected_occurrence = selected_occurrence(occurrences, Map.get(params, "event"))
-    selected_occurrence_position = selected_occurrence_position(occurrences, selected_occurrence)
+    occurrence_summaries = Projects.list_occurrence_summaries(issue)
+
+    selected_occurrence_summary =
+      selected_occurrence_summary(occurrence_summaries, Map.get(params, "event"))
+
+    selected_occurrence =
+      load_selected_occurrence(issue, selected_occurrence_summary)
+
+    selected_occurrence_position =
+      selected_occurrence_position(occurrence_summaries, selected_occurrence_summary)
 
     {newer_occurrence, older_occurrence} =
-      surrounding_occurrences(occurrences, selected_occurrence)
+      surrounding_occurrences(occurrence_summaries, selected_occurrence_summary)
 
     socket
     |> assign(:project, project)
@@ -668,15 +675,15 @@ defmodule ArgusWeb.IssuesLive.Show do
     |> assign(:sidebar, AppShell.build(socket.assigns.current_scope.user, project: project))
     |> assign(:tab, tab)
     |> assign(:frame_mode, frame_mode)
-    |> assign(:all_occurrences, occurrences)
-    |> assign(:occurrence_count, length(occurrences))
+    |> assign(:occurrence_summaries, occurrence_summaries)
+    |> assign(:occurrence_count, length(occurrence_summaries))
     |> assign(:selected_occurrence, selected_occurrence)
     |> assign(:selected_occurrence_position, selected_occurrence_position)
     |> assign(:newer_occurrence, newer_occurrence)
     |> assign(:older_occurrence, older_occurrence)
     |> assign(:assignee_options, assignee_options(project))
     |> assign(:assignee_form, assignee_form(issue))
-    |> assign(:tags, Projects.aggregate_tags(issue))
+    |> assign(:tags, tags_for_tab(issue, tab))
     |> assign(:context, context_summary(selected_occurrence, issue))
   end
 
@@ -686,15 +693,20 @@ defmodule ArgusWeb.IssuesLive.Show do
   defp parse_frame_mode(mode) when mode in ~w(in_app all), do: mode
   defp parse_frame_mode(_mode), do: "in_app"
 
-  defp selected_occurrence([], _param), do: nil
-  defp selected_occurrence(occurrences, nil), do: List.first(occurrences)
+  defp selected_occurrence_summary([], _param), do: nil
+  defp selected_occurrence_summary(occurrences, nil), do: List.first(occurrences)
 
-  defp selected_occurrence(occurrences, occurrence_id) when is_integer(occurrence_id),
+  defp selected_occurrence_summary(occurrences, occurrence_id) when is_integer(occurrence_id),
     do: Enum.find(occurrences, &(&1.id == occurrence_id)) || List.first(occurrences)
 
-  defp selected_occurrence(occurrences, occurrence_id) when is_binary(occurrence_id) do
-    Enum.find(occurrences, &(&1.id == String.to_integer(occurrence_id))) ||
-      List.first(occurrences)
+  defp selected_occurrence_summary(occurrences, occurrence_id) when is_binary(occurrence_id) do
+    case Integer.parse(occurrence_id) do
+      {occurrence_id, ""} ->
+        Enum.find(occurrences, &(&1.id == occurrence_id)) || List.first(occurrences)
+
+      _ ->
+        List.first(occurrences)
+    end
   end
 
   defp selected_occurrence_id(nil), do: nil
@@ -721,6 +733,15 @@ defmodule ArgusWeb.IssuesLive.Show do
       Enum.at(occurrences, index + 1)
     }
   end
+
+  defp load_selected_occurrence(_issue, nil), do: nil
+
+  defp load_selected_occurrence(issue, %{id: occurrence_id}) do
+    Projects.get_occurrence(issue, occurrence_id)
+  end
+
+  defp tags_for_tab(issue, "tags"), do: Projects.aggregate_tags(issue)
+  defp tags_for_tab(_issue, _tab), do: %{}
 
   defp issue_patch(project, issue, tab, nil, frame_mode),
     do: ~p"/projects/#{project.slug}/issues/#{issue.id}?tab=#{tab}&frames=#{frame_mode}"

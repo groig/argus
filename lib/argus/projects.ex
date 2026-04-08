@@ -272,6 +272,32 @@ defmodule Argus.Projects do
     {occurrences, total_count}
   end
 
+  def list_occurrence_summaries(%ErrorEvent{id: error_event_id}) do
+    Repo.all(
+      from error_occurrence in ErrorOccurrence,
+        where: error_occurrence.error_event_id == ^error_event_id,
+        order_by: [desc: error_occurrence.timestamp, desc: error_occurrence.id],
+        select:
+          struct(error_occurrence, [
+            :id,
+            :event_id,
+            :timestamp,
+            :request_url,
+            :user_context,
+            :exception_values
+          ])
+    )
+  end
+
+  def get_occurrence(%ErrorEvent{id: error_event_id}, occurrence_id) do
+    Repo.one(
+      from error_occurrence in ErrorOccurrence,
+        where:
+          error_occurrence.error_event_id == ^error_event_id and
+            error_occurrence.id == ^occurrence_id
+    )
+  end
+
   def list_all_occurrences(%ErrorEvent{id: error_event_id}) do
     Repo.all(
       from error_occurrence in ErrorOccurrence,
@@ -280,11 +306,14 @@ defmodule Argus.Projects do
     )
   end
 
-  def aggregate_tags(%ErrorEvent{} = error_event) do
-    error_event
-    |> list_all_occurrences()
+  def aggregate_tags(%ErrorEvent{id: error_event_id}) do
+    Repo.all(
+      from error_occurrence in ErrorOccurrence,
+        where: error_occurrence.error_event_id == ^error_event_id,
+        select: error_occurrence.raw_payload
+    )
     |> Enum.reduce(%{}, fn occurrence, acc ->
-      occurrence.raw_payload
+      occurrence
       |> Map.get("tags", %{})
       |> Enum.reduce(acc, fn {key, value}, outer_acc ->
         value = normalize_tag_value(value)
