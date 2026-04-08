@@ -18,6 +18,7 @@ defmodule ArgusWeb.ProjectLive.IndexTest do
       |> log_in_user(user)
       |> live(~p"/projects")
 
+    assert has_element?(view, "#app-sidebar.sticky.overflow-y-auto")
     assert has_element?(view, "#project-card-#{project.id}")
     assert render(view) =~ "Recent issues"
     assert render(view) =~ "My First Project"

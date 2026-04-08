@@ -14,8 +14,11 @@ defmodule ArgusWeb.Layouts do
     <%= if @current_scope && @current_scope.user && @sidebar do %>
       <div class="min-h-screen bg-slate-100 text-zinc-900">
         <div class="flex min-h-screen">
-          <aside class="hidden w-72 shrink-0 border-r border-zinc-900 bg-zinc-950 px-5 py-5 text-zinc-100 lg:flex lg:flex-col">
-            <div class="border-b border-zinc-900/80 pb-5">
+          <aside
+            id="app-sidebar"
+            class="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-zinc-900 bg-zinc-950 px-5 py-5 text-zinc-100 lg:flex lg:flex-col"
+          >
+            <div class="shrink-0 border-b border-zinc-900/80 pb-5">
               <.link
                 navigate={ArgusWeb.UserAuth.signed_in_path(@current_scope.user)}
                 class="flex items-center gap-3"
@@ -34,7 +37,7 @@ defmodule ArgusWeb.Layouts do
               </.link>
             </div>
 
-            <div :if={length(@sidebar.teams) > 1} class="mt-8 space-y-2">
+            <div :if={length(@sidebar.teams) > 1} class="mt-8 shrink-0 space-y-2">
               <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-600">Teams</p>
               <div class="space-y-1">
                 <.link
@@ -62,7 +65,7 @@ defmodule ArgusWeb.Layouts do
               </div>
             </div>
 
-            <div class="mt-8 flex-1 space-y-2">
+            <div class="mt-8 min-h-0 flex-1 space-y-2">
               <div :if={@sidebar.active_team} class="space-y-1">
                 <.link
                   navigate={~p"/projects?team_id=#{@sidebar.active_team.id}"}
@@ -111,7 +114,7 @@ defmodule ArgusWeb.Layouts do
               </div>
             </div>
 
-            <div class="border-t border-zinc-800 pt-4">
+            <div class="mt-6 shrink-0 border-t border-zinc-800 pt-4">
               <details class="group relative">
                 <summary class="flex w-full list-none cursor-pointer items-center gap-3 border border-transparent px-2 py-2 text-left transition hover:border-zinc-800 hover:bg-zinc-900 [&::-webkit-details-marker]:hidden">
                   <div class="flex h-10 w-10 items-center justify-center bg-zinc-800 text-sm font-semibold uppercase text-zinc-100">
