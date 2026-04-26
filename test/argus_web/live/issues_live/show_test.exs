@@ -99,6 +99,22 @@ defmodule ArgusWeb.IssuesLive.ShowTest do
     refute render(view) =~ "Clicked retry payment"
   end
 
+  test "marks the issue as resolved from the detail page", %{
+    conn: conn,
+    project: project,
+    issue: issue
+  } do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/issues/#{issue.id}")
+
+    assert has_element?(view, "button[phx-value-status='resolved']")
+
+    render_click(element(view, "button[phx-value-status='resolved']"))
+
+    assert Projects.get_error_event(project, issue.id).status == :resolved
+    refute has_element?(view, "button[phx-value-status='resolved']")
+    assert has_element?(view, "button[phx-value-status='unresolved']")
+  end
+
   test "assigns and unassigns the issue from the detail page", %{
     conn: conn,
     project: project,
