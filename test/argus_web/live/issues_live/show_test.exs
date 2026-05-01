@@ -42,8 +42,58 @@ defmodule ArgusWeb.IssuesLive.ShowTest do
     assert html =~ "raise RuntimeError(&quot;invoice failed&quot;)"
     assert html =~ "Current user"
     assert html =~ "alice@example.com"
-    refute html =~ "Loaded cart"
+    event_html = render(element(view, "#issue-event-view"))
+
+    refute event_html =~ "Loaded cart"
     refute html =~ "django.core.handlers"
+  end
+
+  test "copies selected issue details as plain text", %{
+    conn: conn,
+    project: project,
+    issue: issue
+  } do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/issues/#{issue.id}")
+
+    assert has_element?(view, "#copy-issue-button[data-copy-target='#issue-copy-text']")
+    assert has_element?(view, "#issue-copy-text")
+
+    copy_text = render(element(view, "#issue-copy-text"))
+
+    assert copy_text =~ "Argus Issue"
+    assert copy_text =~ "Title: RuntimeError: invoice failed"
+    assert copy_text =~ "/projects/#{project.slug}/issues/#{issue.id}"
+    assert copy_text =~ "Selected Event"
+    assert copy_text =~ "Event ID: evt-latest"
+    assert copy_text =~ "Frame 1: billing.views / checkout / line 42"
+    assert copy_text =~ "raise RuntimeError(&quot;invoice failed&quot;)"
+    assert copy_text =~ "current_user: alice@example.com"
+    assert copy_text =~ "Request"
+    assert copy_text =~ "Contexts"
+    assert copy_text =~ "Query Breadcrumbs"
+    assert copy_text =~ "Loaded cart"
+    refute copy_text =~ "django.core.handlers"
+  end
+
+  test "copied traceback follows the visible frame mode", %{
+    conn: conn,
+    project: project,
+    issue: issue
+  } do
+    [latest_occurrence | _older_occurrences] = Projects.list_all_occurrences(issue)
+
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/issues/#{issue.id}")
+
+    refute render(element(view, "#issue-copy-text")) =~ "django.core.handlers"
+
+    render_click(element(view, "#issue-show-all-frames"))
+
+    assert_patch(
+      view,
+      ~p"/projects/#{project.slug}/issues/#{issue.id}?tab=event&event=#{latest_occurrence.id}&frames=all"
+    )
+
+    assert render(element(view, "#issue-copy-text")) =~ "django.core.handlers"
   end
 
   test "toggles between in-app frames and all frames, and keeps breadcrumbs secondary", %{

@@ -12,6 +12,16 @@ defmodule ArgusWeb.IssuesLive.Show do
         {@issue.title}
         <:subtitle>{@issue.culprit || "No culprit captured"}</:subtitle>
         <:actions>
+          <button
+            id="copy-issue-button"
+            type="button"
+            phx-hook="ClipboardCopy"
+            data-copy-target="#issue-copy-text"
+            data-copy-toast="Issue copied"
+            class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-900 shadow-[0_1px_0_rgba(15,23,42,0.03)] transition duration-150 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2"
+          >
+            <.icon name="hero-clipboard-document-list-mini" class="size-4" /> Copy issue
+          </button>
           <.button navigate={~p"/projects/#{@project.slug}/issues"} variant="ghost" size="sm">
             Back to issues
           </.button>
@@ -44,6 +54,8 @@ defmodule ArgusWeb.IssuesLive.Show do
           </.button>
         </:actions>
       </.header>
+
+      <textarea id="issue-copy-text" class="sr-only" readonly>{@copy_text}</textarea>
 
       <section class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_22rem]">
         <div class="space-y-6">
@@ -685,6 +697,7 @@ defmodule ArgusWeb.IssuesLive.Show do
     |> assign(:assignee_form, assignee_form(issue))
     |> assign(:tags, tags_for_tab(issue, tab))
     |> assign(:context, context_summary(selected_occurrence, issue))
+    |> assign(:copy_text, issue_copy_text(project, issue, selected_occurrence, frame_mode))
   end
 
   defp parse_tab(tab) when tab in ~w(event events tags breadcrumbs context), do: tab
@@ -1119,6 +1132,201 @@ defmodule ArgusWeb.IssuesLive.Show do
 
   defp modules_count(modules) when is_map(modules), do: map_size(modules)
   defp modules_count(_modules), do: nil
+
+  defp issue_copy_text(project, issue, nil, _frame_mode) do
+    [
+      "Argus Issue",
+      "Title: #{issue.title}",
+      "URL: #{issue_url(project, issue)}",
+      "Project: #{project.name}",
+      "Status: #{issue.status}",
+      "Level: #{issue.level}",
+      "Assignee: #{assignee_name(issue.assignee)}",
+      "Culprit: #{issue.culprit || "-"}",
+      "Fingerprint: #{issue.fingerprint}",
+      "First seen: #{format_datetime(issue.first_seen_at)}",
+      "Last seen: #{format_datetime(issue.last_seen_at)}",
+      "Occurrences: #{issue.occurrence_count}",
+      "",
+      "No event data captured."
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp issue_copy_text(project, issue, occurrence, frame_mode) do
+    payload = occurrence.raw_payload || %{}
+
+    [
+      issue_copy_summary(project, issue),
+      event_copy_summary(occurrence, issue),
+      exception_copy_text(occurrence, frame_mode),
+      map_copy_section("User", occurrence_user(occurrence)),
+      map_copy_section("Request", occurrence_request(occurrence)),
+      map_copy_section("SDK", occurrence_sdk(occurrence)),
+      map_copy_section("Tags", normalize_map(payload["tags"] || issue.tags)),
+      map_copy_section("Contexts", normalize_map(payload["contexts"] || issue.contexts)),
+      map_copy_section("Extra", occurrence_extra(occurrence)),
+      breadcrumbs_copy_text(occurrence)
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n\n")
+  end
+
+  defp issue_copy_summary(project, issue) do
+    [
+      "Argus Issue",
+      "Title: #{issue.title}",
+      "URL: #{issue_url(project, issue)}",
+      "Project: #{project.name}",
+      "Status: #{issue.status}",
+      "Level: #{issue.level}",
+      "Assignee: #{assignee_name(issue.assignee)}",
+      "Culprit: #{issue.culprit || "-"}",
+      "Fingerprint: #{issue.fingerprint}",
+      "First seen: #{format_datetime(issue.first_seen_at)}",
+      "Last seen: #{format_datetime(issue.last_seen_at)}",
+      "Occurrences: #{issue.occurrence_count}"
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp event_copy_summary(occurrence, issue) do
+    [
+      "Selected Event",
+      "Event ID: #{occurrence.event_id}",
+      "Timestamp: #{format_datetime(occurrence.timestamp)}",
+      "Request URL: #{occurrence.request_url || "-"}",
+      "Exception: #{primary_exception_title(occurrence) || issue.title}"
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp exception_copy_text(occurrence, frame_mode) do
+    occurrence.exception_values
+    |> Enum.with_index(1)
+    |> Enum.map(fn {exception, index} ->
+      frames = stack_frames(exception)
+      visible_frames = visible_stack_frames(frames, frame_mode)
+
+      [
+        "Exception #{index}: #{exception["type"] || "Captured exception"}",
+        exception["value"] && "Message: #{exception["value"]}",
+        "Handled: #{handled_exception?(occurrence)}",
+        "Traceback: #{frame_scope_note(frames, frame_mode)}",
+        frames_copy_text(visible_frames)
+      ]
+      |> Enum.reject(&blank?/1)
+      |> Enum.join("\n")
+    end)
+    |> case do
+      [] -> nil
+      sections -> ["Exceptions" | sections] |> Enum.join("\n\n")
+    end
+  end
+
+  defp frames_copy_text([]), do: "No frames captured."
+
+  defp frames_copy_text(frames) do
+    frames
+    |> Enum.with_index(1)
+    |> Enum.map(fn {frame, index} ->
+      [
+        "Frame #{index}: #{frame_location(frame)}",
+        code_context_copy_text(frame),
+        frame_vars_copy_text(frame)
+      ]
+      |> Enum.reject(&blank?/1)
+      |> Enum.join("\n")
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp code_context_copy_text(frame) do
+    frame
+    |> code_context()
+    |> case do
+      [] ->
+        nil
+
+      lines ->
+        body =
+          lines
+          |> Enum.map(fn line ->
+            marker = if line.current, do: "=>", else: "  "
+            "#{marker} #{line.number}: #{line.text}"
+          end)
+          |> Enum.join("\n")
+
+        "Code:\n#{indent(body, 2)}"
+    end
+  end
+
+  defp frame_vars_copy_text(frame) do
+    frame
+    |> frame_vars()
+    |> case do
+      vars when map_size(vars) == 0 ->
+        nil
+
+      vars ->
+        "Local variables:\n#{map_copy_lines(vars, 2)}"
+    end
+  end
+
+  defp map_copy_section(_title, data) when data in [nil, %{}], do: nil
+
+  defp map_copy_section(title, data) when is_map(data) do
+    "#{title}\n#{map_copy_lines(data, 2)}"
+  end
+
+  defp map_copy_lines(data, spaces) when is_map(data) do
+    data
+    |> map_entries()
+    |> Enum.map(fn {key, value} ->
+      "#{String.duplicate(" ", spaces)}#{key}: #{format_value(value)}"
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp breadcrumbs_copy_text(occurrence) do
+    occurrence
+    |> query_breadcrumbs()
+    |> case do
+      [] ->
+        nil
+
+      breadcrumbs ->
+        body =
+          breadcrumbs
+          |> Enum.map(fn breadcrumb ->
+            [
+              "- #{format_breadcrumb_timestamp(breadcrumb["timestamp"])} #{breadcrumb["message"] || breadcrumb["category"] || breadcrumb["type"] || "Breadcrumb"}",
+              map_size(Map.get(breadcrumb, "data", %{})) > 0 &&
+                map_copy_lines(breadcrumb["data"], 2)
+            ]
+            |> Enum.reject(&blank?/1)
+            |> Enum.join("\n")
+          end)
+          |> Enum.join("\n")
+
+        "Query Breadcrumbs\n#{body}"
+    end
+  end
+
+  defp issue_url(project, issue) do
+    url(~p"/projects/#{project.slug}/issues/#{issue.id}")
+  end
+
+  defp format_datetime(nil), do: "-"
+  defp format_datetime(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
+
+  defp indent(text, spaces) do
+    padding = String.duplicate(" ", spaces)
+
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(padding <> &1))
+  end
 
   defp map_entries(map) when is_map(map) do
     map

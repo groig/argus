@@ -36,7 +36,9 @@ const RelativeTime = {
 const ClipboardCopy = {
   mounted() {
     this.el.addEventListener("click", async () => {
-      const value = this.el.dataset.copyValue
+      const target = this.el.dataset.copyTarget
+      const targetEl = target ? document.querySelector(target) : null
+      const value = targetEl ? (targetEl.value || targetEl.textContent) : this.el.dataset.copyValue
       const toast = this.el.dataset.copyToast || "Copied to clipboard"
 
       if (!value) return
