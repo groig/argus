@@ -22,7 +22,6 @@ You also need a separate record of production secrets and deploy settings:
 - `PHX_HOST`
 - `PORT`
 - `POOL_SIZE`
-- `ARGUS_ISSUE_WEBHOOK_URL`
 - mailer provider credentials and adapter config
 - reverse-proxy and TLS configuration
 - the release version or container image tag currently in production

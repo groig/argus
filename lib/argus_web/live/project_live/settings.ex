@@ -2,6 +2,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
   use ArgusWeb, :live_view
 
   alias Argus.Projects
+  alias Argus.Projects.{IssueNotifier, WebhookTemplate}
   alias Argus.Teams
   alias ArgusWeb.AppShell
 
@@ -176,6 +177,58 @@ defmodule ArgusWeb.ProjectLive.Settings do
               </div>
             </.form>
           </section>
+
+          <section class="border border-zinc-200 bg-white p-6">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div class="space-y-1">
+                <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Issue webhook</h2>
+                <p class="text-sm text-zinc-500">
+                  Send new and reappearing issues from this project to a platform-specific webhook body.
+                </p>
+              </div>
+              <.badge kind={if @project.webhook_url, do: :resolved, else: :warning}>
+                {if @project.webhook_url, do: "configured", else: "not configured"}
+              </.badge>
+            </div>
+
+            <.form
+              for={@webhook_form}
+              id="project-webhook-form"
+              phx-change="validate-webhook"
+              phx-submit="update-webhook"
+              class="mt-6 space-y-5"
+            >
+              <.input
+                id="project-webhook-url"
+                field={@webhook_form[:webhook_url]}
+                type="url"
+                label="Webhook URL"
+                placeholder="https://chat.example.test/hooks/..."
+              />
+              <.input
+                id="project-webhook-body-template"
+                field={@webhook_form[:webhook_body_template]}
+                type="textarea"
+                label="JSON body template"
+                rows="10"
+                spellcheck="false"
+                class="font-mono text-xs"
+              />
+
+              <div class="flex flex-wrap justify-end gap-3">
+                <.button
+                  id="send-project-webhook-test"
+                  type="button"
+                  variant="secondary"
+                  phx-click="send-test-webhook"
+                  disabled={is_nil(@project.webhook_url)}
+                >
+                  Send test event
+                </.button>
+                <.button>Save webhook</.button>
+              </div>
+            </.form>
+          </section>
         </div>
       </section>
 
@@ -238,6 +291,46 @@ defmodule ArgusWeb.ProjectLive.Settings do
     end
   end
 
+  def handle_event("validate-webhook", %{"project" => params}, socket) do
+    form =
+      socket.assigns.project
+      |> Projects.change_project_webhook(params)
+      |> Map.put(:action, :validate)
+      |> to_form(as: :project)
+
+    {:noreply, assign(socket, :webhook_form, form)}
+  end
+
+  def handle_event("update-webhook", %{"project" => params}, socket) do
+    case Projects.update_project_webhook(socket.assigns.project, params) do
+      {:ok, project} ->
+        {:noreply,
+         socket
+         |> assign_page(project)
+         |> put_flash(:info, "Project webhook updated.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :webhook_form, to_form(changeset, as: :project))}
+    end
+  end
+
+  def handle_event("send-test-webhook", _params, socket) do
+    case IssueNotifier.send_test_webhook(socket.assigns.project) do
+      :ok ->
+        {:noreply, put_flash(socket, :info, "Test webhook sent.")}
+
+      {:error, :not_configured} ->
+        {:noreply, put_flash(socket, :error, "No project webhook URL is configured.")}
+
+      {:error, {:unexpected_status, status}} ->
+        {:noreply,
+         put_flash(socket, :error, "Webhook test returned an unexpected status: #{status}.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not send the test webhook.")}
+    end
+  end
+
   def handle_event("confirm-delete-project", _params, socket) do
     {:noreply, assign(socket, :delete_project_modal_open, true)}
   end
@@ -274,5 +367,15 @@ defmodule ArgusWeb.ProjectLive.Settings do
     |> assign(:sidebar, AppShell.build(socket.assigns.current_scope.user, project: project))
     |> assign(:delete_project_modal_open, false)
     |> assign(:project_form, to_form(Projects.change_project(project), as: :project))
+    |> assign(:webhook_form, to_form(webhook_changeset(project), as: :project))
+  end
+
+  defp webhook_changeset(project) do
+    template = project.webhook_body_template || WebhookTemplate.default_body()
+
+    Projects.change_project_webhook(project, %{
+      "webhook_url" => project.webhook_url,
+      "webhook_body_template" => template
+    })
   end
 end

@@ -16,7 +16,6 @@ defmodule Argus.Projects.IssueNotifierTest do
     previous_config = Application.get_env(:argus, IssueNotifier, [])
 
     Application.put_env(:argus, IssueNotifier,
-      webhook_url: "https://hooks.argus.test/issues",
       req_options: [plug: {Req.Test, Argus.IssueWebhookStub}]
     )
 
@@ -29,13 +28,25 @@ defmodule Argus.Projects.IssueNotifierTest do
 
   test "delivers created issue notifications to the assignee and posts the webhook" do
     %{team: team, project: project} = workspace_fixture()
+
     assignee = user_fixture(%{name: "Assigned Person"})
     fallback_member = user_fixture()
     membership_fixture(team, assignee)
     membership_fixture(team, fallback_member)
 
     issue = insert_issue(project, assignee_id: assignee.id)
+
+    project =
+      configure_webhook!(project, ~s({
+        "text": "{{event_label}} in {{project.name}}: {{issue.message}}",
+        "issue": "{{issue}}",
+        "tags": "{{tags}}",
+        "missing": "{{missing.path}}"
+      }))
+      |> Repo.preload(team: [team_members: :user])
+
     issue = Repo.preload(issue, assignee: [], project: [team: [team_members: :user]])
+    issue = %{issue | project: project}
 
     Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -54,19 +65,11 @@ defmodule Argus.Projects.IssueNotifierTest do
     end)
 
     assert_receive {:webhook_request, payload}
-    assert payload["event"] == "issue_created"
+    assert payload["text"] == "A new issue was detected in #{project.name}: Checkout broke"
     assert payload["issue"]["title"] == issue.title
-    assert payload["issue"]["message"] == "Checkout broke"
-    assert payload["issue"]["reason"] == "boom"
-    assert payload["issue"]["code_path"] == "billing.jobs.sync.perform/2:44"
     assert payload["issue"]["request_path"] == "/jobs/1"
-    assert payload["project"]["slug"] == project.slug
-    assert payload["assignee"]["id"] == assignee.id
-    assert payload["occurrence"]["event_id"] =~ "evt-"
-    assert payload["occurrence"]["message"] == "Checkout broke"
-    assert payload["occurrence"]["reason"] == "boom"
-    assert payload["occurrence"]["code_path"] == "billing.jobs.sync.perform/2:44"
-    assert payload["request"]["path"] == "/jobs/1"
+    assert payload["tags"] == %{"environment" => "test"}
+    assert payload["missing"] == nil
   end
 
   test "notifies confirmed team members when the issue is unassigned" do
@@ -94,26 +97,47 @@ defmodule Argus.Projects.IssueNotifierTest do
     end)
   end
 
-  test "sends a dedicated webhook test payload" do
+  test "does not post a webhook when the project has no webhook configured" do
+    %{project: project} = workspace_fixture()
+    issue = insert_issue(project)
+    issue = Repo.preload(issue, assignee: [], project: [team: [team_members: :user]])
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      send(self(), :unexpected_webhook_request)
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok = IssueNotifier.deliver(issue, :created)
+
+    refute_receive :unexpected_webhook_request
+  end
+
+  test "sends a project webhook test payload through the configured template" do
+    %{project: project} = workspace_fixture()
+
+    project =
+      configure_webhook!(
+        project,
+        ~s({"text":"{{event_label}} for {{project.slug}}","project_id":"{{project.id}}"})
+      )
+
     Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(self(), {:webhook_test_request, Jason.decode!(body)})
       Req.Test.json(conn, %{"ok" => true})
     end)
 
-    assert :ok = IssueNotifier.send_test_webhook()
+    assert :ok = IssueNotifier.send_test_webhook(project)
 
     assert_receive {:webhook_test_request, payload}
-    assert payload["event"] == "webhook_test"
-    assert payload["issue"]["message"] == "This is a test webhook from Argus."
-    assert payload["issue"]["reason"] == "Test exception for webhook delivery"
-    assert payload["issue"]["code_path"] == "ArgusWeb.AdminLive.Index.handle_event/3"
-    assert payload["project"]["slug"] == "sample-project"
-    assert payload["occurrence"]["message"] == "This is a test webhook from Argus."
-    assert payload["occurrence"]["reason"] == "Test exception for webhook delivery"
-    assert payload["occurrence"]["code_path"] == "ArgusWeb.AdminLive.Index.handle_event/3"
-    assert payload["request"]["path"] == "/admin"
-    assert payload["url"] =~ "/admin"
+    assert payload["text"] == "Test issue webhook for #{project.slug}"
+    assert payload["project_id"] == project.id
+  end
+
+  test "returns not configured for project webhook tests without a URL" do
+    %{project: project} = workspace_fixture()
+
+    assert {:error, :not_configured} = IssueNotifier.send_test_webhook(project)
   end
 
   defp insert_issue(project, attrs \\ []) do
@@ -176,5 +200,15 @@ defmodule Argus.Projects.IssueNotifierTest do
       Projects.upsert_issue_and_occurrence(project, issue_attrs, occurrence_attrs)
 
     issue
+  end
+
+  defp configure_webhook!(project, template) do
+    {:ok, project} =
+      Projects.update_project_webhook(project, %{
+        "webhook_url" => "https://hooks.argus.test/issues",
+        "webhook_body_template" => template
+      })
+
+    project
   end
 end

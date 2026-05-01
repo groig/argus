@@ -4,7 +4,6 @@ defmodule ArgusWeb.AdminLive.Index do
   alias Argus.Accounts
   alias Argus.Accounts.User
   alias Argus.Projects
-  alias Argus.Projects.IssueNotifier
   alias Argus.Teams
   alias Argus.Teams.Team
   alias ArgusWeb.AppShell
@@ -36,41 +35,6 @@ defmodule ArgusWeb.AdminLive.Index do
           </.button>
         </:actions>
       </.header>
-
-      <section
-        id="admin-webhook-config"
-        class="mb-6 grid gap-4 border border-zinc-200 bg-white px-6 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
-      >
-        <div class="space-y-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Issue webhook</h2>
-            <.badge kind={if @webhook_url, do: :resolved, else: :warning}>
-              {if @webhook_url, do: "configured", else: "not configured"}
-            </.badge>
-          </div>
-          <p class="text-sm text-zinc-500">
-            Argus posts issue lifecycle events to this endpoint. Use the test button to verify the integration without ingesting a real event.
-          </p>
-          <p
-            id="admin-webhook-url"
-            class="break-all border border-zinc-200 bg-slate-50 px-4 py-3 font-mono text-xs text-zinc-700"
-          >
-            {@webhook_url || "No webhook URL configured."}
-          </p>
-        </div>
-
-        <div class="flex items-end">
-          <.button
-            id="send-test-webhook"
-            type="button"
-            variant="secondary"
-            phx-click="send-test-webhook"
-            disabled={is_nil(@webhook_url)}
-          >
-            Send test event
-          </.button>
-        </div>
-      </section>
 
       <section class="border border-zinc-200 bg-white">
         <div
@@ -525,23 +489,6 @@ defmodule ArgusWeb.AdminLive.Index do
     end
   end
 
-  def handle_event("send-test-webhook", _params, socket) do
-    case IssueNotifier.send_test_webhook() do
-      :ok ->
-        {:noreply, put_flash(socket, :info, "Test webhook sent.")}
-
-      {:error, :not_configured} ->
-        {:noreply, put_flash(socket, :error, "No issue webhook URL is configured.")}
-
-      {:error, {:unexpected_status, status}} ->
-        {:noreply,
-         put_flash(socket, :error, "Webhook test returned an unexpected status: #{status}.")}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Could not send the test webhook.")}
-    end
-  end
-
   def handle_event("create-team", %{"team" => params}, socket) do
     case Teams.create_team(params) do
       {:ok, _team} ->
@@ -664,7 +611,6 @@ defmodule ArgusWeb.AdminLive.Index do
 
     socket
     |> assign(:tab, socket.assigns[:tab] || "users")
-    |> assign(:webhook_url, IssueNotifier.configured_webhook_url())
     |> assign(:users, users)
     |> assign(:teams, teams)
     |> assign(:selected_user, selected_user)

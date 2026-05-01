@@ -96,9 +96,9 @@ Resolved issues reopen because a fresh occurrence puts them back into active wor
 Argus currently has two notification outputs:
 
 - email
-- one optional global webhook
+- optional per-project webhooks
 
-They run asynchronously and do not block ingestion. If SMTP is down or a webhook receiver is slow, the issue should still land in the UI. The webhook is global and unsigned in v1 because the current target is an internal receiver, not a public integration surface.
+They run asynchronously and do not block ingestion. If SMTP is down or a webhook receiver is slow, the issue should still land in the UI. Webhooks are unsigned in v1 because the current target is an internal receiver, not a public integration surface.
 
 Recipient rules:
 
@@ -144,12 +144,12 @@ Argus stays small on purpose. The current build favors predictable server-side b
 - asynchronous notifications without a durable job system
 - team-based access rules
 - separate grouped issues and raw occurrences
-- a plain global webhook
+- per-project JSON-template issue webhooks
 
 ### Deferred Work
 
 - browser-level E2E harnesses such as Playwright
 - durable delivery/retry queues
-- per-project notification policies
-- alert rules and external integrations beyond the single webhook
+- per-event notification policies
+- alert rules and external integrations beyond issue webhooks
 - distributed log-rate-limit coordination across nodes

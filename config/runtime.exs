@@ -22,9 +22,7 @@ end
 
 config :argus, ArgusWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-config :argus, Argus.Projects.IssueNotifier,
-  webhook_url: System.get_env("ARGUS_ISSUE_WEBHOOK_URL"),
-  req_options: []
+config :argus, Argus.Projects.IssueNotifier, req_options: []
 
 config :argus, :ui,
   screenshot_mode: System.get_env("ARGUS_SCREENSHOT_MODE") in ~w(1 true TRUE yes)

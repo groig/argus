@@ -45,11 +45,12 @@ defmodule ArgusWeb.TeamLive.SettingsTest do
 end
 
 defmodule ArgusWeb.ProjectLive.SettingsTest do
-  use ArgusWeb.ConnCase, async: true
+  use ArgusWeb.ConnCase, async: false
 
   import Ecto.Query
   import Phoenix.LiveViewTest
 
+  alias Argus.Projects.IssueNotifier
   alias Argus.Projects.Project
   alias Argus.Repo
 
@@ -57,6 +58,16 @@ defmodule ArgusWeb.ProjectLive.SettingsTest do
   import Argus.WorkspaceFixtures
 
   setup %{conn: conn} do
+    previous_config = Application.get_env(:argus, IssueNotifier, [])
+
+    Application.put_env(:argus, IssueNotifier,
+      req_options: [plug: {Req.Test, Argus.IssueWebhookStub}]
+    )
+
+    on_exit(fn ->
+      Application.put_env(:argus, IssueNotifier, previous_config || [])
+    end)
+
     user = user_fixture()
     team = team_fixture()
     _membership = membership_fixture(team, user, :admin)
@@ -83,6 +94,58 @@ defmodule ArgusWeb.ProjectLive.SettingsTest do
     assert updated_project.name == "Billing API"
     assert updated_project.slug == "billing-api"
     assert updated_project.log_limit == 250
+  end
+
+  test "updates the selected project webhook and sends a test event", %{
+    conn: conn,
+    project: project
+  } do
+    test_pid = self()
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:webhook_test_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/settings")
+
+    render_submit(
+      form(view, "#project-webhook-form", %{
+        "project" => %{
+          "webhook_url" => "https://hooks.argus.test/project",
+          "webhook_body_template" =>
+            ~s({"text":"{{event_label}} for {{project.name}}","url":"{{url}}"})
+        }
+      })
+    )
+
+    updated_project = Repo.get!(Project, project.id)
+
+    assert updated_project.webhook_url == "https://hooks.argus.test/project"
+    assert updated_project.webhook_body_template =~ "{{project.name}}"
+
+    render_click(element(view, "#send-project-webhook-test"))
+
+    assert_receive {:webhook_test_request, payload}
+    assert payload["text"] == "Test issue webhook for #{project.name}"
+    assert payload["url"] =~ "/projects/#{project.slug}/settings"
+  end
+
+  test "validates webhook templates before saving", %{conn: conn, project: project} do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/settings")
+
+    html =
+      render_change(
+        form(view, "#project-webhook-form", %{
+          "project" => %{
+            "webhook_url" => "https://hooks.argus.test/project",
+            "webhook_body_template" => "{"
+          }
+        })
+      )
+
+    assert html =~ "must be valid JSON"
   end
 
   test "prunes oldest logs when the project log limit is lowered", %{conn: conn, project: project} do

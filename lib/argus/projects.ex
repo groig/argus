@@ -121,6 +121,11 @@ defmodule Argus.Projects do
     |> Project.changeset(stringify_keys(attrs))
   end
 
+  def change_project_webhook(%Project{} = project, attrs \\ %{}) do
+    project
+    |> Project.webhook_changeset(stringify_keys(attrs))
+  end
+
   def update_project(%Project{} = project, attrs) do
     project
     |> change_project(attrs)
@@ -133,6 +138,16 @@ defmodule Argus.Projects do
 
       error ->
         error
+    end
+  end
+
+  def update_project_webhook(%Project{} = project, attrs) do
+    project
+    |> change_project_webhook(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, updated_project} -> {:ok, Repo.preload(updated_project, :team)}
+      error -> error
     end
   end
 

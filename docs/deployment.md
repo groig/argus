@@ -30,7 +30,6 @@ Optional variables:
 
 - `POOL_SIZE`
 - `ECTO_IPV6`
-- `ARGUS_ISSUE_WEBHOOK_URL`
 - `DNS_CLUSTER_QUERY`
 
 `PHX_HOST` should match the public host users and SDKs reach. Project DSNs use that host.

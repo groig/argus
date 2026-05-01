@@ -49,14 +49,14 @@ This is for local development only.
 
 ### Issue Notifications
 
-- `ARGUS_ISSUE_WEBHOOK_URL`
+Project settings can define an issue webhook URL and JSON body template.
 
-If set, Argus will `POST` JSON for:
+If set, Argus will `POST` the rendered JSON body for:
 
 - new issues
 - reappearing resolved issues
 
-If unset, webhook delivery is disabled and email notifications continue as usual.
+If unset for a project, webhook delivery is disabled for that project and email notifications continue as usual.
 
 ### Log Rate Limiting
 
@@ -175,7 +175,7 @@ Argus supports Sentry log envelope items. If a client uses a payload type Argus 
 
 Check:
 
-- `ARGUS_ISSUE_WEBHOOK_URL` is set in the running environment
+- the project has a webhook URL and valid JSON body template in project settings
 - only new/reappearing issues trigger the webhook
 - existing unresolved/ignored issue updates do not trigger webhook delivery
 

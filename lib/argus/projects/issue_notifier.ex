@@ -12,38 +12,20 @@ defmodule Argus.Projects.IssueNotifier do
 
   alias Argus.Accounts.User
   alias Argus.Mailer
-  alias Argus.Projects.{ErrorEvent, ErrorOccurrence}
+  alias Argus.Projects.{ErrorEvent, ErrorOccurrence, Project, WebhookTemplate}
   alias Argus.Repo
 
   @task_supervisor Argus.TaskSupervisor
 
-  def configured_webhook_url do
-    Application.get_env(:argus, __MODULE__, [])
-    |> Keyword.get(:webhook_url)
-    |> present_string()
-  end
-
-  def send_test_webhook do
-    case configured_webhook_url() do
+  def send_test_webhook(%Project{} = project) do
+    case project_webhook(project) do
       nil ->
         {:error, :not_configured}
 
-      webhook_url ->
-        case post_webhook(webhook_url, test_webhook_payload()) do
-          :ok ->
-            :ok
-
-          {:error, {:unexpected_status, status, body}} ->
-            Logger.warning(
-              "issue webhook test returned unexpected status #{status}: #{inspect(body)}"
-            )
-
-            {:error, {:unexpected_status, status}}
-
-          {:error, reason} ->
-            Logger.warning("failed to deliver issue webhook test: #{inspect(reason)}")
-            {:error, reason}
-        end
+      {webhook_url, template} ->
+        project
+        |> test_webhook_payload()
+        |> render_and_post_webhook(webhook_url, template, "issue webhook test")
     end
   end
 
@@ -83,20 +65,17 @@ defmodule Argus.Projects.IssueNotifier do
   end
 
   defp deliver_webhook(%ErrorEvent{} = issue, disposition) do
-    case configured_webhook_url() do
+    case project_webhook(issue.project) do
       nil ->
         :ok
 
-      webhook_url ->
-        case post_webhook(webhook_url, webhook_payload(issue, disposition)) do
-          :ok ->
-            :ok
-
-          {:error, {:unexpected_status, status, body}} ->
-            Logger.warning("issue webhook returned unexpected status #{status}: #{inspect(body)}")
-
-          {:error, reason} ->
-            Logger.warning("failed to deliver issue webhook: #{inspect(reason)}")
+      {webhook_url, template} ->
+        issue
+        |> webhook_payload(disposition)
+        |> render_and_post_webhook(webhook_url, template, "issue webhook")
+        |> case do
+          :ok -> :ok
+          {:error, _reason} -> :ok
         end
     end
   end
@@ -169,6 +148,7 @@ defmodule Argus.Projects.IssueNotifier do
 
     %{
       event: webhook_event(disposition),
+      event_label: disposition_text(disposition),
       occurred_at: DateTime.to_iso8601(issue.last_seen_at),
       issue: issue_payload(issue, occurrence),
       project: %{
@@ -214,16 +194,18 @@ defmodule Argus.Projects.IssueNotifier do
   defp webhook_event(:created), do: "issue_created"
   defp webhook_event(:reopened), do: "issue_reopened"
 
-  defp test_webhook_payload do
+  defp test_webhook_payload(%Project{} = project) do
+    project = Repo.preload(project, :team)
     timestamp = DateTime.utc_now() |> DateTime.truncate(:second)
-    request_url = "#{ArgusWeb.Endpoint.url()}/admin"
-    request_path = "/admin"
+    request_url = "#{ArgusWeb.Endpoint.url()}/projects/#{project.slug}/settings"
+    request_path = "/projects/#{project.slug}/settings"
     message = "This is a test webhook from Argus."
     reason = "Test exception for webhook delivery"
-    code_path = "ArgusWeb.AdminLive.Index.handle_event/3"
+    code_path = "ArgusWeb.ProjectLive.Settings.handle_event/3"
 
     %{
       event: "webhook_test",
+      event_label: "Test issue webhook",
       occurred_at: DateTime.to_iso8601(timestamp),
       issue: %{
         id: 0,
@@ -240,13 +222,13 @@ defmodule Argus.Projects.IssueNotifier do
         platform: "elixir"
       },
       project: %{
-        id: 0,
-        name: "Sample Project",
-        slug: "sample-project"
+        id: project.id,
+        name: project.name,
+        slug: project.slug
       },
       team: %{
-        id: 0,
-        name: "Sample Team"
+        id: project.team.id,
+        name: project.team.name
       },
       assignee: nil,
       occurrence: %{
@@ -284,6 +266,30 @@ defmodule Argus.Projects.IssueNotifier do
       },
       url: request_url
     }
+  end
+
+  defp project_webhook(%Project{} = project) do
+    with webhook_url when is_binary(webhook_url) <- present_string(project.webhook_url),
+         template when is_binary(template) <- present_string(project.webhook_body_template) do
+      {webhook_url, template}
+    else
+      _ -> nil
+    end
+  end
+
+  defp render_and_post_webhook(payload, webhook_url, template, label) do
+    with {:ok, body} <- WebhookTemplate.render(template, payload),
+         :ok <- post_webhook(webhook_url, body) do
+      :ok
+    else
+      {:error, {:unexpected_status, status, body}} ->
+        Logger.warning("#{label} returned unexpected status #{status}: #{inspect(body)}")
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        Logger.warning("failed to deliver #{label}: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   defp post_webhook(webhook_url, payload) do

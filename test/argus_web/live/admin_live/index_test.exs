@@ -1,28 +1,12 @@
 defmodule ArgusWeb.AdminLive.IndexTest do
-  use ArgusWeb.ConnCase, async: false
+  use ArgusWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias Argus.Accounts
-  alias Argus.Projects.IssueNotifier
 
   import Argus.AccountsFixtures
   import Swoosh.TestAssertions
-
-  setup do
-    previous_config = Application.get_env(:argus, IssueNotifier, [])
-
-    Application.put_env(:argus, IssueNotifier,
-      webhook_url: "https://hooks.argus.test/issues",
-      req_options: [plug: {Req.Test, Argus.IssueWebhookStub}]
-    )
-
-    on_exit(fn ->
-      Application.put_env(:argus, IssueNotifier, previous_config || [])
-    end)
-
-    :ok
-  end
 
   test "renders admin dashboard for global admins", %{conn: conn} do
     admin = admin_fixture()
@@ -34,44 +18,13 @@ defmodule ArgusWeb.AdminLive.IndexTest do
 
     assert has_element?(view, "#admin-tabs")
     assert has_element?(view, "#admin-users")
+    refute has_element?(view, "#admin-webhook-config")
 
     render_click(element(view, "#open-invite-modal"))
     assert has_element?(view, "#invite-user-form")
 
     render_click(element(view, "#open-team-modal"))
     assert has_element?(view, "#team-form")
-  end
-
-  test "shows the configured webhook url and sends a test event", %{conn: conn} do
-    admin = admin_fixture()
-    test_pid = self()
-
-    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
-      {:ok, body, conn} = Plug.Conn.read_body(conn)
-      send(test_pid, {:webhook_test_request, Jason.decode!(body)})
-      Req.Test.json(conn, %{"ok" => true})
-    end)
-
-    {:ok, view, _html} =
-      conn
-      |> log_in_user(admin)
-      |> live(~p"/admin")
-
-    assert has_element?(view, "#admin-webhook-url", "https://hooks.argus.test/issues")
-
-    render_click(element(view, "#send-test-webhook"))
-
-    assert_receive {:webhook_test_request, payload}
-    assert payload["event"] == "webhook_test"
-    assert payload["issue"]["message"] == "This is a test webhook from Argus."
-    assert payload["issue"]["reason"] == "Test exception for webhook delivery"
-    assert payload["issue"]["code_path"] == "ArgusWeb.AdminLive.Index.handle_event/3"
-    assert payload["project"]["slug"] == "sample-project"
-    assert payload["occurrence"]["message"] == "This is a test webhook from Argus."
-    assert payload["occurrence"]["reason"] == "Test exception for webhook delivery"
-    assert payload["occurrence"]["code_path"] == "ArgusWeb.AdminLive.Index.handle_event/3"
-    assert payload["request"]["path"] == "/admin"
-    assert payload["url"] =~ "/admin"
   end
 
   test "updates another user's global role from the users table", %{conn: conn} do

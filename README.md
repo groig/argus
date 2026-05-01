@@ -95,7 +95,7 @@ bin/screenshots
 ## Development Notes
 
 - Dev mail preview is available at `http://localhost:4000/dev/mailbox`
-- The optional issue webhook is configured with `ARGUS_ISSUE_WEBHOOK_URL`
+- Optional issue webhooks are configured per project from the project settings page
 - Logs can be rate-limited globally through `config :argus, Argus.Logs.RateLimiter, ...`
 - `bin/screenshots` uses the local `chromium` and `chromedriver` binaries and seeds a dedicated screenshot workspace instead of dropping your dev database
 
@@ -105,7 +105,7 @@ bin/screenshots
 - release health
 - source maps
 - code snippet syntax highlighting
-- alert rules and integrations beyond the single webhook
+- alert rules and integrations beyond per-project issue webhooks
 
 ## License
 

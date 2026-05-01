@@ -86,7 +86,7 @@ Some production settings are runtime environment variables. Others are applicati
 
 Current examples:
 
-- `DATABASE_URL`, `SECRET_KEY_BASE`, `PHX_HOST`, and `ARGUS_ISSUE_WEBHOOK_URL` are runtime inputs
+- `DATABASE_URL`, `SECRET_KEY_BASE`, and `PHX_HOST` are runtime inputs
 - the log rate limiter is configured in `config/config.exs` and currently requires a new build to change
 - mailer adapter choice should be treated as deployment config and reviewed before each production rollout
 
@@ -130,5 +130,5 @@ Keep these limits in mind when you operate Argus:
 - no dedicated health endpoint
 - no built-in data retention
 - no durable background job queue
-- no per-project notification policies
+- no per-event notification policies
 - no cluster-wide log rate limiting
