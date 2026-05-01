@@ -59,6 +59,7 @@ defmodule ArgusWeb.IssuesLive.IndexTest do
     html = render(view)
 
     assert html =~ unresolved_issue.title
+    assert html =~ "unresolved"
     refute html =~ resolved_issue.title
 
     render_change(
@@ -71,6 +72,7 @@ defmodule ArgusWeb.IssuesLive.IndexTest do
 
     assert html =~ unresolved_issue.title
     assert html =~ resolved_issue.title
+    assert html =~ "resolved"
   end
 
   test "bulk resolves selected issues", %{conn: conn, project: project} do

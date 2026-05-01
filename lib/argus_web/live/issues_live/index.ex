@@ -94,13 +94,14 @@ defmodule ArgusWeb.IssuesLive.Index do
                 <th class="px-4 py-3.5">Issue</th>
                 <th class="px-4 py-3.5">Assignee</th>
                 <th class="px-4 py-3.5">Level</th>
+                <th class="px-4 py-3.5">Status</th>
                 <th class="px-4 py-3.5">Count</th>
                 <th class="px-4 py-3.5">Last seen</th>
               </tr>
             </thead>
             <tbody id="issues" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
               <tr :if={@issue_count == 0} id="issues-empty-state">
-                <td colspan="6" class="px-6 py-16">
+                <td colspan="7" class="px-6 py-16">
                   <.empty_state
                     title="No issues match these filters"
                     description="Try broadening the search or waiting for a new event."
@@ -145,6 +146,9 @@ defmodule ArgusWeb.IssuesLive.Index do
                 </td>
                 <td class="px-4 py-4">
                   <.badge kind={issue.level}>{issue.level}</.badge>
+                </td>
+                <td class="px-4 py-4">
+                  <.badge kind={issue.status}>{issue.status}</.badge>
                 </td>
                 <td class="px-4 py-4 font-medium text-zinc-700">{issue.occurrence_count}</td>
                 <td class="px-4 py-4"><.relative_time at={issue.last_seen_at} /></td>
