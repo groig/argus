@@ -40,11 +40,20 @@ const ClipboardCopy = {
       const targetEl = target ? document.querySelector(target) : null
       const value = targetEl ? (targetEl.value || targetEl.textContent) : this.el.dataset.copyValue
       const toast = this.el.dataset.copyToast || "Copied to clipboard"
+      const originalLabel = this.el.dataset.copyLabel || this.el.textContent
+      const copiedLabel = this.el.dataset.copiedLabel || "Copied!"
 
       if (!value) return
 
       try {
         await navigator.clipboard.writeText(value)
+        if (!this.el.dataset.iconOnly) {
+          this.el.textContent = copiedLabel
+          clearTimeout(this.resetTimer)
+          this.resetTimer = setTimeout(() => {
+            this.el.textContent = originalLabel
+          }, 1500)
+        }
         window.dispatchEvent(new CustomEvent("argus:toast", {
           detail: {kind: "info", message: toast}
         }))
@@ -54,6 +63,68 @@ const ClipboardCopy = {
         }))
       }
     })
+  }
+}
+
+const KeyboardShortcuts = {
+  mounted() {
+    this.sequence = ""
+    this.resetTimer = null
+
+    this.listener = event => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+      if (this.isEditable(event.target)) return
+
+      const key = event.key.toLowerCase()
+
+      if (key === "?") {
+        event.preventDefault()
+        this.pushEvent("shortcut", {key: "help"})
+        return
+      }
+
+      if (this.sequence === "g") {
+        clearTimeout(this.resetTimer)
+        this.sequence = ""
+
+        if (key === "i" || key === "l") {
+          event.preventDefault()
+          this.pushEvent("shortcut", {key: `g ${key}`})
+        }
+
+        return
+      }
+
+      if (key === "g") {
+        event.preventDefault()
+        this.sequence = "g"
+        this.resetTimer = setTimeout(() => {
+          this.sequence = ""
+        }, 900)
+        return
+      }
+
+      if (["r", "i", "j", "k"].includes(key)) {
+        event.preventDefault()
+        this.pushEvent("shortcut", {key})
+      }
+    }
+
+    window.addEventListener("keydown", this.listener)
+  },
+
+  destroyed() {
+    window.removeEventListener("keydown", this.listener)
+    clearTimeout(this.resetTimer)
+  },
+
+  isEditable(target) {
+    return target && (
+      target.closest("input") ||
+      target.closest("textarea") ||
+      target.closest("select") ||
+      target.closest("[contenteditable='true']")
+    )
   }
 }
 
@@ -126,6 +197,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     RelativeTime,
     ClipboardCopy,
     ToastViewport,
+    KeyboardShortcuts,
   },
 })
 

@@ -12,19 +12,19 @@ defmodule ArgusWeb.Layouts do
   def app(assigns) do
     ~H"""
     <%= if @current_scope && @current_scope.user && @sidebar do %>
-      <div class="min-h-screen bg-slate-100 text-zinc-900">
+      <div class="min-h-screen bg-[#e8eaed] text-zinc-900">
         <div class="flex min-h-screen">
           <aside
             id="app-sidebar"
             class="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-zinc-900 bg-zinc-950 px-5 py-5 text-zinc-100 lg:flex lg:flex-col"
           >
-            <div class="shrink-0 border-b border-zinc-900/80 pb-5">
+            <div class="shrink-0 border-b border-zinc-800/90 pb-5">
               <.link
                 navigate={ArgusWeb.UserAuth.signed_in_path(@current_scope.user)}
                 class="flex items-center gap-3"
               >
-                <div class="flex h-9 w-9 items-center justify-center border border-sky-500/30 bg-sky-500/12 text-sm font-semibold text-sky-300">
-                  A
+                <div class="flex h-9 w-9 items-center justify-center border border-orange-500/25 bg-orange-500/10 text-orange-300">
+                  <img src={~p"/images/logo.svg"} alt="" class="h-5 w-7 text-orange-500" />
                 </div>
                 <div class="space-y-0.5">
                   <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
@@ -37,18 +37,18 @@ defmodule ArgusWeb.Layouts do
               </.link>
             </div>
 
-            <div :if={length(@sidebar.teams) > 1} class="mt-8 shrink-0 space-y-2">
-              <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-600">Teams</p>
-              <div class="space-y-1">
+            <div :if={length(@sidebar.teams) > 1} class="mt-8 shrink-0 space-y-2.5">
+              <p class="text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-600">Teams</p>
+              <div class="space-y-1.5">
                 <.link
                   :for={team <- @sidebar.teams}
                   navigate={Map.get(@sidebar.team_targets, team.id)}
                   class={[
-                    "flex items-center justify-between border-l-2 px-3 py-2 text-sm transition",
+                    "flex items-center justify-between border-l-2 px-3 py-2.5 text-sm transition",
                     @sidebar.active_team && @sidebar.active_team.id == team.id &&
-                      "border-sky-400 bg-zinc-900 text-white",
+                      "border-sky-400 bg-zinc-900/90 text-white",
                     @sidebar.active_team && @sidebar.active_team.id != team.id &&
-                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100"
+                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100"
                   ]}
                 >
                   <span class={[
@@ -65,16 +65,16 @@ defmodule ArgusWeb.Layouts do
               </div>
             </div>
 
-            <div class="mt-8 min-h-0 flex-1 space-y-2">
-              <div :if={@sidebar.active_team} class="space-y-1">
+            <div class="mt-8 min-h-0 flex-1 space-y-2.5">
+              <div :if={@sidebar.active_team} class="space-y-1.5">
                 <.link
                   navigate={~p"/projects?team_id=#{@sidebar.active_team.id}"}
                   class={[
-                    "flex items-center gap-3 border-l-2 px-3 py-2 text-sm transition",
+                    "flex items-center gap-3 border-l-2 px-3 py-2.5 text-sm transition",
                     is_nil(@sidebar.active_project) &&
-                      "border-sky-400 bg-zinc-900 font-medium text-white",
+                      "border-sky-400 bg-zinc-900/90 font-medium text-white",
                     !is_nil(@sidebar.active_project) &&
-                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100"
+                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100"
                   ]}
                 >
                   <.icon name="hero-squares-2x2-mini" class="size-4 shrink-0" />
@@ -82,7 +82,7 @@ defmodule ArgusWeb.Layouts do
                 </.link>
               </div>
 
-              <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-600">
+              <p class="text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-600">
                 Projects
               </p>
               <div
@@ -91,21 +91,21 @@ defmodule ArgusWeb.Layouts do
               >
                 No projects yet.
               </div>
-              <div :if={@sidebar.projects != []} class="space-y-1">
+              <div :if={@sidebar.projects != []} class="space-y-1.5">
                 <.link
                   :for={project <- @sidebar.projects}
                   navigate={~p"/projects/#{project.slug}/issues"}
                   class={[
-                    "flex items-center gap-3 border-l-2 pl-5 pr-3 py-2 text-sm transition",
+                    "flex items-center gap-3 border-l-2 pl-5 pr-3 py-2.5 text-sm transition",
                     @sidebar.active_project && @sidebar.active_project.id == project.id &&
-                      "border-sky-400 bg-zinc-50 font-medium text-zinc-950",
+                      "border-sky-400 bg-zinc-100 font-medium text-zinc-950",
                     (!@sidebar.active_project || @sidebar.active_project.id != project.id) &&
-                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100"
+                      "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100"
                   ]}
                 >
                   <div class={[
                     "flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border text-[10px] font-semibold uppercase",
-                    project_icon_tone(project)
+                    project_avatar_class(project)
                   ]}>
                     {project_initial(project)}
                   </div>
@@ -114,7 +114,7 @@ defmodule ArgusWeb.Layouts do
               </div>
             </div>
 
-            <div class="mt-6 shrink-0 border-t border-zinc-800 pt-4">
+            <div class="mt-7 shrink-0 border-t border-zinc-800 pt-5">
               <details class="group relative">
                 <summary class="flex w-full list-none cursor-pointer items-center gap-3 border border-transparent px-2 py-2 text-left transition hover:border-zinc-800 hover:bg-zinc-900 [&::-webkit-details-marker]:hidden">
                   <div class="flex h-10 w-10 items-center justify-center bg-zinc-800 text-sm font-semibold uppercase text-zinc-100">
@@ -164,7 +164,7 @@ defmodule ArgusWeb.Layouts do
             </div>
           </aside>
 
-          <main class="min-w-0 flex-1 bg-slate-100 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <main class="min-w-0 flex-1 bg-[#e8eaed] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
             <div class="w-full space-y-8">
               {render_slot(@inner_block)}
             </div>
@@ -172,7 +172,7 @@ defmodule ArgusWeb.Layouts do
         </div>
       </div>
     <% else %>
-      <main class="flex min-h-screen items-center justify-center bg-slate-100 px-6 py-12">
+      <main class="flex min-h-screen items-center justify-center bg-[#e8eaed] px-6 py-12">
         <div class="w-full max-w-lg">{render_slot(@inner_block)}</div>
       </main>
     <% end %>
@@ -183,29 +183,6 @@ defmodule ArgusWeb.Layouts do
 
   defp active_team_name(%{active_team: %{name: name}}), do: name
   defp active_team_name(_sidebar), do: nil
-
-  defp project_initial(%{name: name}) when is_binary(name) do
-    name
-    |> String.trim()
-    |> String.first()
-    |> case do
-      nil -> "?"
-      initial -> String.upcase(initial)
-    end
-  end
-
-  defp project_initial(_project), do: "?"
-
-  defp project_icon_tone(project) do
-    case rem(:erlang.phash2({project.slug, project.name}), 6) do
-      0 -> "border-sky-500/30 bg-sky-500/12 text-sky-300"
-      1 -> "border-emerald-500/30 bg-emerald-500/12 text-emerald-300"
-      2 -> "border-amber-500/30 bg-amber-500/12 text-amber-300"
-      3 -> "border-rose-500/30 bg-rose-500/12 text-rose-300"
-      4 -> "border-violet-500/30 bg-violet-500/12 text-violet-300"
-      _ -> "border-cyan-500/30 bg-cyan-500/12 text-cyan-300"
-    end
-  end
 
   attr :flash, :map, required: true
   attr :id, :string, default: "flash-group"

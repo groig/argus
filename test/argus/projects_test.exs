@@ -177,6 +177,41 @@ defmodule Argus.ProjectsTest do
     end
   end
 
+  describe "issue_occurrence_trends/2" do
+    test "returns fixed 7-day buckets for issue occurrences" do
+      %{project: project} = workspace_fixture()
+      start_date = Date.add(Date.utc_today(), -6)
+
+      timestamps =
+        [0, 3, 6]
+        |> Enum.map(fn day_offset ->
+          start_date
+          |> Date.add(day_offset)
+          |> DateTime.new!(~T[12:00:00], "Etc/UTC")
+        end)
+
+      {:ok, %{issue: issue}} =
+        Projects.upsert_issue_and_occurrence(
+          project,
+          issue_attrs(Enum.at(timestamps, 0)),
+          occurrence_attrs("evt-trend-0", Enum.at(timestamps, 0))
+        )
+
+      for {timestamp, index} <- Enum.with_index(Enum.drop(timestamps, 1), 1) do
+        {:ok, %{issue: _issue}} =
+          Projects.upsert_issue_and_occurrence(
+            project,
+            issue_attrs(timestamp),
+            occurrence_attrs("evt-trend-#{index}", timestamp)
+          )
+      end
+
+      assert Projects.issue_occurrence_trends([issue.id]) == %{
+               issue.id => [1, 0, 0, 1, 0, 0, 1]
+             }
+    end
+  end
+
   defp issue_attrs(timestamp) do
     %{
       fingerprint: "RuntimeError|boom|billing.jobs.sync",

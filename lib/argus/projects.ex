@@ -233,6 +233,39 @@ defmodule Argus.Projects do
     )
   end
 
+  def issue_occurrence_trends(issue_ids, days \\ 7)
+
+  def issue_occurrence_trends([], _days), do: %{}
+
+  def issue_occurrence_trends(issue_ids, days) when is_list(issue_ids) and days > 0 do
+    issue_ids = Enum.uniq(issue_ids)
+    today = Date.utc_today()
+    start_date = Date.add(today, -(days - 1))
+    start_at = DateTime.new!(start_date, ~T[00:00:00], "Etc/UTC")
+    dates = Enum.map(0..(days - 1), &Date.add(start_date, &1))
+
+    rows =
+      Repo.all(
+        from occurrence in ErrorOccurrence,
+          where: occurrence.error_event_id in ^issue_ids and occurrence.timestamp >= ^start_at,
+          group_by: [occurrence.error_event_id, fragment("date(?)", occurrence.timestamp)],
+          select:
+            {occurrence.error_event_id, fragment("date(?)", occurrence.timestamp),
+             count(occurrence.id)}
+      )
+
+    grouped =
+      Enum.reduce(rows, %{}, fn {issue_id, date, count}, acc ->
+        issue_counts = Map.get(acc, issue_id, %{})
+        Map.put(acc, issue_id, Map.put(issue_counts, date, count))
+      end)
+
+    Map.new(issue_ids, fn issue_id ->
+      counts = Map.get(grouped, issue_id, %{})
+      {issue_id, Enum.map(dates, &Map.get(counts, &1, 0))}
+    end)
+  end
+
   def issue_dsn(%Project{} = project) do
     uri = URI.parse(ArgusWeb.Endpoint.url())
     host = uri.host || "localhost"

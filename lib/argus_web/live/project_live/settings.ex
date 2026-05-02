@@ -32,17 +32,23 @@ defmodule ArgusWeb.ProjectLive.Settings do
 
       <section class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <div class="space-y-6">
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+            <div class="mb-5">
+              <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Project information</h2>
+              <p class="mt-1 text-sm text-zinc-500">
+                Read-only identifiers, ingestion credentials, and recent activity.
+              </p>
+            </div>
             <div class="grid gap-4 sm:grid-cols-2">
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Slug
                 </p>
                 <p class="mt-2 font-mono text-sm font-semibold text-zinc-950">{@project.slug}</p>
               </div>
 
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Created
                 </p>
                 <div class="mt-2">
@@ -54,7 +60,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
               </div>
 
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Grouped issues
                 </p>
                 <p class="mt-2 text-3xl font-semibold tracking-tight text-zinc-950">
@@ -63,7 +69,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
               </div>
 
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Stored logs
                 </p>
                 <p class="mt-2 text-3xl font-semibold tracking-tight text-zinc-950">
@@ -72,7 +78,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
               </div>
 
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Log limit
                 </p>
                 <p class="mt-2 text-3xl font-semibold tracking-tight text-zinc-950">
@@ -83,7 +89,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
 
             <div class="mt-6 space-y-4 border-t border-zinc-200 pt-6">
               <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">DSN</p>
+                <p class="text-sm font-medium text-zinc-500">DSN</p>
                 <div class="mt-2">
                   <.copy_to_clipboard
                     value={Projects.issue_dsn(@project)}
@@ -93,7 +99,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
               </div>
 
               <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   DSN key
                 </p>
                 <div class="mt-2">
@@ -103,13 +109,18 @@ defmodule ArgusWeb.ProjectLive.Settings do
             </div>
           </section>
 
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-red-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="flex items-start justify-between gap-4">
-              <div>
-                <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Danger zone</h2>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Deleting a project removes its grouped issues, raw events, and stored logs.
-                </p>
+              <div class="flex gap-3">
+                <div class="mt-0.5 flex size-9 items-center justify-center rounded-sm bg-red-50 text-red-700">
+                  <.icon name="hero-exclamation-triangle" class="size-5" />
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Danger zone</h2>
+                  <p class="mt-1 text-sm text-zinc-500">
+                    Deleting a project removes its grouped issues, raw events, and stored logs.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -134,11 +145,11 @@ defmodule ArgusWeb.ProjectLive.Settings do
         </div>
 
         <div class="space-y-6">
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="space-y-1">
               <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Project settings</h2>
               <p class="text-sm text-zinc-500">
-                Update the public name, the slug used in project URLs, and the maximum stored logs for this project.
+                Update editable project details, navigation color, and stored log limits.
               </p>
             </div>
 
@@ -163,6 +174,34 @@ defmodule ArgusWeb.ProjectLive.Settings do
                 label="Slug"
                 required
               />
+              <div class="space-y-3">
+                <p class="text-sm font-medium text-zinc-600">Project color</p>
+                <div class="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                  <label
+                    :for={{label, color} <- accent_options()}
+                    class={[
+                      "flex cursor-pointer flex-col items-center gap-2 rounded-sm border px-2 py-3 text-xs font-medium transition",
+                      selected_project_accent(@project_form, @project) == color &&
+                        "border-zinc-400 bg-slate-50",
+                      selected_project_accent(@project_form, @project) != color &&
+                        "border-zinc-200 bg-white hover:border-zinc-300"
+                    ]}
+                  >
+                    <input
+                      type="radio"
+                      name={@project_form[:accent_color].name}
+                      value={color}
+                      checked={selected_project_accent(@project_form, @project) == color}
+                      class="sr-only"
+                    />
+                    <span class={[
+                      "size-6 rounded-full ring-4",
+                      accent_swatch_class(color)
+                    ]} />
+                    <span class="text-zinc-600">{label}</span>
+                  </label>
+                </div>
+              </div>
               <.input
                 id="edit-project-log-limit"
                 field={@project_form[:log_limit]}
@@ -178,7 +217,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
             </.form>
           </section>
 
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="space-y-1">
                 <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Issue webhook</h2>
@@ -186,7 +225,7 @@ defmodule ArgusWeb.ProjectLive.Settings do
                   Send new and reappearing issues from this project to a platform-specific webhook body.
                 </p>
               </div>
-              <.badge kind={if @project.webhook_url, do: :resolved, else: :warning}>
+              <.badge kind={if @project.webhook_url, do: :configured, else: :not_configured}>
                 {if @project.webhook_url, do: "configured", else: "not configured"}
               </.badge>
             </div>
@@ -377,5 +416,11 @@ defmodule ArgusWeb.ProjectLive.Settings do
       "webhook_url" => project.webhook_url,
       "webhook_body_template" => template
     })
+  end
+
+  defp selected_project_accent(form, project) do
+    value = form[:accent_color].value
+
+    if value in [nil, ""], do: project_accent(project), else: value
   end
 end

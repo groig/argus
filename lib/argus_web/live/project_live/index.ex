@@ -63,32 +63,32 @@ defmodule ArgusWeb.ProjectLive.Index do
         <% true -> %>
           <div class="space-y-6">
             <section class="grid gap-4 xl:grid-cols-5">
-              <div class="border border-zinc-200 bg-white p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <div class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                <p class="text-sm font-medium text-zinc-500">
                   Projects
                 </p>
-                <p class="mt-3 text-3xl font-semibold tracking-tight text-zinc-950">
+                <p class="mt-3 text-[32px] font-semibold tracking-tight text-zinc-950">
                   {@summary.project_count}
                 </p>
               </div>
-              <div class="border border-zinc-200 border-l-4 border-l-sky-500 bg-white p-5 xl:col-span-2">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
+              <div class="border border-red-200 border-l-4 border-l-red-500 bg-red-50/70 p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)] xl:col-span-2">
+                <p class="text-sm font-medium text-red-700">
                   Unresolved issues
                 </p>
-                <p class="mt-3 text-4xl font-semibold tracking-tight text-zinc-950">
+                <p class="mt-3 text-[40px] font-semibold tracking-tight text-zinc-950">
                   {@summary.unresolved_count}
                 </p>
               </div>
-              <div class="border border-zinc-200 bg-white p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <div class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                <p class="text-sm font-medium text-zinc-500">
                   Grouped issues
                 </p>
-                <p class="mt-3 text-3xl font-semibold tracking-tight text-zinc-950">
+                <p class="mt-3 text-[32px] font-semibold tracking-tight text-zinc-950">
                   {@summary.issue_count}
                 </p>
               </div>
-              <div class="border border-zinc-200 bg-white p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <div class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+                <p class="text-sm font-medium text-zinc-500">
                   Latest issue
                 </p>
                 <div class="mt-3">
@@ -105,7 +105,7 @@ defmodule ArgusWeb.ProjectLive.Index do
             </section>
 
             <div class="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-              <section class="border border-zinc-200 bg-white p-6">
+              <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
                 <div class="flex items-end justify-between gap-4">
                   <div>
                     <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Projects</h2>
@@ -119,7 +119,10 @@ defmodule ArgusWeb.ProjectLive.Index do
                   <article
                     :for={project <- @projects}
                     id={"project-card-#{project.id}"}
-                    class="border border-zinc-200 bg-slate-50 p-5 transition hover:border-sky-200 hover:bg-white"
+                    class={[
+                      "border border-t-4 border-zinc-200 bg-slate-50 p-5 transition hover:border-sky-200 hover:bg-white",
+                      project_accent_border_class(project)
+                    ]}
                   >
                     <div class="flex items-start justify-between gap-4">
                       <div class="min-w-0">
@@ -128,7 +131,7 @@ defmodule ArgusWeb.ProjectLive.Index do
                       </div>
                       <.badge kind={
                         if project_stat(@project_stats, project.id, :unresolved_count) > 0,
-                          do: :error,
+                          do: :unresolved,
                           else: :resolved
                       }>
                         {project_stat(@project_stats, project.id, :unresolved_count)} unresolved
@@ -137,7 +140,7 @@ defmodule ArgusWeb.ProjectLive.Index do
 
                     <div class="mt-5 grid grid-cols-3 gap-3 border-t border-zinc-200 pt-4">
                       <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        <p class="text-sm font-medium text-zinc-500">
                           Issues
                         </p>
                         <p class="mt-2 text-lg font-semibold text-zinc-950">
@@ -145,7 +148,7 @@ defmodule ArgusWeb.ProjectLive.Index do
                         </p>
                       </div>
                       <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        <p class="text-sm font-medium text-zinc-500">
                           Logs
                         </p>
                         <p class="mt-2 text-lg font-semibold text-zinc-950">
@@ -153,7 +156,7 @@ defmodule ArgusWeb.ProjectLive.Index do
                         </p>
                       </div>
                       <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        <p class="text-sm font-medium text-zinc-500">
                           Last issue
                         </p>
                         <div class="mt-2">
@@ -176,6 +179,16 @@ defmodule ArgusWeb.ProjectLive.Index do
                         <p class="mt-1 font-mono text-xs text-zinc-500">
                           {last_issue.culprit || "No culprit captured"}
                         </p>
+                        <div class="mt-3 flex items-center gap-3">
+                          <.sparkline
+                            values={Map.get(@issue_trends, last_issue.id, List.duplicate(0, 7))}
+                            kind={to_string(last_issue.level)}
+                            label={"7-day trend for #{last_issue.title}"}
+                          />
+                          <p class="text-xs text-zinc-500">
+                            {Enum.sum(Map.get(@issue_trends, last_issue.id, []))} in 7 days
+                          </p>
+                        </div>
                       <% else %>
                         <p class="text-sm text-zinc-500">
                           No issues captured yet. This project is ready to ingest events.
@@ -184,23 +197,21 @@ defmodule ArgusWeb.ProjectLive.Index do
                     </div>
 
                     <div class="mt-5 flex flex-wrap gap-2">
-                      <.button navigate={~p"/projects/#{project.slug}/issues"}>Issues</.button>
+                      <.button navigate={~p"/projects/#{project.slug}/issues"} variant="secondary">
+                        Issues
+                      </.button>
                       <.button navigate={~p"/projects/#{project.slug}/logs"} variant="secondary">
                         Logs
-                      </.button>
-                      <.button
-                        :if={@can_manage_team?}
-                        navigate={~p"/projects/#{project.slug}/settings"}
-                        variant="ghost"
-                      >
-                        Settings
                       </.button>
                     </div>
                   </article>
                 </div>
               </section>
 
-              <section id="recent-issues" class="border border-zinc-200 bg-white p-6">
+              <section
+                id="recent-issues"
+                class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+              >
                 <div>
                   <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Recent issues</h2>
                   <p class="mt-1 text-sm text-zinc-500">
@@ -212,8 +223,8 @@ defmodule ArgusWeb.ProjectLive.Index do
                   <%= if @recent_issues == [] do %>
                     <.empty_state
                       title="No recent issues"
-                      description="This team has not captured any grouped issues yet."
-                      icon="hero-bug-ant"
+                      description="No unresolved issues. Things are looking good."
+                      icon="hero-check-circle"
                     />
                   <% end %>
 
@@ -232,8 +243,16 @@ defmodule ArgusWeb.ProjectLive.Index do
                       <.badge kind={issue.level}>{issue.level}</.badge>
                     </div>
                     <div class="mt-3 flex items-center justify-between gap-3">
-                      <.badge kind={issue.status}>{issue.status}</.badge>
-                      <.relative_time at={issue.last_seen_at} />
+                      <div class="flex items-center gap-2">
+                        <.badge kind={issue.status}>{issue.status}</.badge>
+                        <.sparkline
+                          values={Map.get(@issue_trends, issue.id, List.duplicate(0, 7))}
+                          kind={to_string(issue.level)}
+                          label={"7-day trend for #{issue.title}"}
+                          class="h-8"
+                        />
+                      </div>
+                      <.relative_time at={issue.last_seen_at} class="text-xs" />
                     </div>
                   </.link>
                 </div>
@@ -256,6 +275,7 @@ defmodule ArgusWeb.ProjectLive.Index do
      |> assign(:active_team, nil)
      |> assign(:projects, [])
      |> assign(:project_stats, %{})
+     |> assign(:issue_trends, %{})
      |> assign(:recent_issues, [])
      |> assign(:summary, %{
        project_count: 0,
@@ -275,6 +295,8 @@ defmodule ArgusWeb.ProjectLive.Index do
     projects = if active_team, do: Projects.list_projects_for_team(user, active_team), else: []
     project_stats = Projects.project_stats(projects)
     recent_issues = Projects.recent_error_events_for_projects(projects)
+    trend_issue_ids = trend_issue_ids(projects, project_stats, recent_issues)
+    issue_trends = Projects.issue_occurrence_trends(trend_issue_ids)
 
     {:noreply,
      socket
@@ -283,6 +305,7 @@ defmodule ArgusWeb.ProjectLive.Index do
      |> assign(:active_team, active_team)
      |> assign(:projects, projects)
      |> assign(:project_stats, project_stats)
+     |> assign(:issue_trends, issue_trends)
      |> assign(:recent_issues, recent_issues)
      |> assign(:summary, build_summary(projects, project_stats, recent_issues))
      |> assign(
@@ -330,5 +353,16 @@ defmodule ArgusWeb.ProjectLive.Index do
     project_stats
     |> Map.get(project_id, @empty_stats)
     |> Map.get(:last_issue)
+  end
+
+  defp trend_issue_ids(projects, project_stats, recent_issues) do
+    project_ids =
+      projects
+      |> Enum.map(&last_issue(project_stats, &1.id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(& &1.id)
+
+    recent_ids = Enum.map(recent_issues, & &1.id)
+    Enum.uniq(project_ids ++ recent_ids)
   end
 end

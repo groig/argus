@@ -79,11 +79,20 @@ defmodule ArgusWeb.ProjectLive.SettingsTest do
   test "updates the selected project", %{conn: conn, project: project} do
     {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/settings")
 
+    assert has_element?(
+             view,
+             "#project-edit-form input[name='project[accent_color]'][value='rose']"
+           )
+
+    assert has_element?(view, "[data-copy-toast='DSN copied']")
+    assert has_element?(view, "[data-copy-toast='DSN key copied']")
+
     render_submit(
       form(view, "#project-edit-form", %{
         "project" => %{
           "name" => "Billing API",
           "slug" => "billing-api",
+          "accent_color" => "rose",
           "log_limit" => "250"
         }
       })
@@ -93,6 +102,7 @@ defmodule ArgusWeb.ProjectLive.SettingsTest do
 
     assert updated_project.name == "Billing API"
     assert updated_project.slug == "billing-api"
+    assert updated_project.accent_color == "rose"
     assert updated_project.log_limit == 250
   end
 

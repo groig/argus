@@ -80,8 +80,23 @@ defmodule ArgusWeb.IssuesLive.IndexTest do
 
     {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/issues")
 
+    refute has_element?(view, "button[phx-value-status='resolved']")
+
     render_click(element(view, "input[phx-value-id='#{issue.id}']"))
+    assert has_element?(view, "button[phx-value-status='resolved']")
+
     render_click(element(view, "button[phx-value-status='resolved']"))
+
+    assert Projects.get_error_event(project, issue.id).status == :resolved
+  end
+
+  test "keyboard shortcut resolves selected issues", %{conn: conn, project: project} do
+    issue = issue_fixture(project, %{title: "Keyboard timeout"})
+
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/issues")
+
+    render_click(element(view, "input[phx-value-id='#{issue.id}']"))
+    render_hook(view, "shortcut", %{"key" => "r"})
 
     assert Projects.get_error_event(project, issue.id).status == :resolved
   end

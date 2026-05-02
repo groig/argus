@@ -31,7 +31,14 @@ defmodule ArgusWeb.LogsLive.Index do
         </:actions>
       </.header>
 
-      <section class="overflow-hidden border border-zinc-200 bg-white">
+      <section
+        id="logs-page-shortcuts"
+        phx-hook="KeyboardShortcuts"
+        class={[
+          "overflow-hidden border border-t-4 border-zinc-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]",
+          project_accent_border_class(@project)
+        ]}
+      >
         <div class="border-b border-zinc-200 bg-slate-50 px-6 py-5">
           <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <.form
@@ -66,14 +73,14 @@ defmodule ArgusWeb.LogsLive.Index do
               class={[
                 "inline-flex items-center gap-3 border px-3 py-2 text-sm font-medium transition",
                 @tail_mode &&
-                  "border-sky-200 bg-sky-50 text-sky-700",
+                  "border-emerald-200 bg-emerald-50 text-emerald-700",
                 !@tail_mode &&
-                  "border-zinc-200 bg-white text-zinc-600 hover:border-sky-200 hover:text-sky-700"
+                  "border-zinc-200 bg-white text-zinc-600 hover:border-emerald-200 hover:text-emerald-700"
               ]}
             >
               <span class={[
                 "relative flex h-5 w-9 items-center border transition",
-                @tail_mode && "border-sky-500 bg-sky-500",
+                @tail_mode && "border-emerald-500 bg-emerald-500",
                 !@tail_mode && "border-zinc-300 bg-zinc-200"
               ]}>
                 <span class={[
@@ -85,7 +92,7 @@ defmodule ArgusWeb.LogsLive.Index do
               <span class="inline-flex items-center gap-2">
                 <span class={[
                   "size-2 rounded-full",
-                  @tail_mode && "bg-sky-500",
+                  @tail_mode && "animate-pulse bg-emerald-500",
                   !@tail_mode && "bg-zinc-300"
                 ]} /> Tail mode
               </span>
@@ -117,7 +124,10 @@ defmodule ArgusWeb.LogsLive.Index do
               <tr
                 :for={{dom_id, log_event} <- @streams.logs}
                 id={dom_id}
-                class="align-top transition hover:bg-slate-50"
+                class={[
+                  "align-top transition hover:bg-sky-50/45",
+                  @highlight_log_id == log_event.id && "bg-emerald-50/70"
+                ]}
               >
                 <td class="px-4 py-4"><.relative_time at={log_event.timestamp} /></td>
                 <td class="px-4 py-4">
@@ -135,9 +145,19 @@ defmodule ArgusWeb.LogsLive.Index do
                   </.link>
                 </td>
                 <td class="px-4 py-4">
-                  <p class="max-w-md truncate font-mono text-xs text-zinc-500">
-                    {truncate_metadata(log_event.metadata)}
-                  </p>
+                  <div class="flex max-w-md flex-wrap gap-2">
+                    <span
+                      :for={{key, value} <- metadata_pills(log_event)}
+                      title={"#{key}: #{value}"}
+                      class="inline-flex max-w-full items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 ring-1 ring-zinc-200"
+                    >
+                      <span class="text-zinc-400">{key}</span>
+                      <span class="truncate font-mono text-zinc-800">{value}</span>
+                    </span>
+                    <span :if={metadata_pills(log_event) == []} class="text-xs text-zinc-400">
+                      No metadata
+                    </span>
+                  </div>
                 </td>
                 <td class="px-4 py-4">
                   <.action_button
@@ -188,6 +208,17 @@ defmodule ArgusWeb.LogsLive.Index do
           </div>
         </div>
       </section>
+
+      <.modal id="logs-shortcuts-modal" open={@shortcuts_modal_open} title="Keyboard shortcuts">
+        <div class="space-y-3">
+          <.shortcut_row keys="G then I" label="Go to issues" />
+          <.shortcut_row keys="G then L" label="Go to logs" />
+          <.shortcut_row keys="?" label="Show shortcuts" />
+        </div>
+        <:actions>
+          <.button type="button" variant="ghost" phx-click="close-shortcuts">Close</.button>
+        </:actions>
+      </.modal>
     </Layouts.app>
     """
   end
@@ -214,6 +245,8 @@ defmodule ArgusWeb.LogsLive.Index do
          |> assign(:sidebar, AppShell.build(user, project: project))
          |> assign(:filter_form, to_form(filters, as: :filters))
          |> assign(:tail_mode, false)
+         |> assign(:highlight_log_id, nil)
+         |> assign(:shortcuts_modal_open, false)
          |> assign(:page_size, @page_size)
          |> load_logs(filters, page)}
     end
@@ -224,6 +257,7 @@ defmodule ArgusWeb.LogsLive.Index do
     {:noreply,
      socket
      |> assign(:filter_form, to_form(filters, as: :filters))
+     |> assign(:highlight_log_id, nil)
      |> load_logs(filters, 1)}
   end
 
@@ -245,10 +279,28 @@ defmodule ArgusWeb.LogsLive.Index do
     {:noreply, assign(socket, :tail_mode, tail_mode)}
   end
 
+  def handle_event("shortcut", %{"key" => "g i"}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/projects/#{socket.assigns.project.slug}/issues")}
+  end
+
+  def handle_event("shortcut", %{"key" => "g l"}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/projects/#{socket.assigns.project.slug}/logs")}
+  end
+
+  def handle_event("shortcut", %{"key" => "help"}, socket) do
+    {:noreply, assign(socket, :shortcuts_modal_open, true)}
+  end
+
+  def handle_event("shortcut", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close-shortcuts", _params, socket) do
+    {:noreply, assign(socket, :shortcuts_modal_open, false)}
+  end
+
   @impl true
-  def handle_info({:log_event_created, _log_event}, socket) do
+  def handle_info({:log_event_created, log_event}, socket) do
     if socket.assigns.tail_mode do
-      {:noreply, reload_logs(socket)}
+      {:noreply, socket |> assign(:highlight_log_id, log_event.id) |> reload_logs()}
     else
       {:noreply, socket}
     end
@@ -297,14 +349,46 @@ defmodule ArgusWeb.LogsLive.Index do
 
   defp normalize_page(_page), do: 1
 
-  defp truncate_metadata(metadata) do
-    metadata
-    |> Jason.encode!()
-    |> maybe_truncate(120)
+  defp metadata_pills(log_event) do
+    attributes =
+      log_event.metadata
+      |> normalize_map()
+      |> Map.get("attributes", %{})
+      |> normalize_map()
+
+    [
+      {"route", attributes["http.route"]},
+      {"function", attributes["code.function_name"]},
+      {"env", log_event.environment || attributes["deployment.environment"]},
+      {"release", log_event.release || attributes["sentry.release"]},
+      {"logger", log_event.logger_name || attributes["logger.name"]},
+      {"origin", log_event.origin}
+    ]
+    |> Enum.reject(fn {_key, value} -> blank?(value) end)
+    |> Enum.take(3)
+    |> Enum.map(fn {key, value} -> {key, maybe_truncate(to_string(value), 36)} end)
   end
 
   defp maybe_truncate(value, max) when byte_size(value) > max,
-    do: String.slice(value, 0, max) <> "…"
+    do: String.slice(value, 0, max) <> "..."
 
   defp maybe_truncate(value, _max), do: value
+
+  defp normalize_map(map) when is_map(map), do: map
+  defp normalize_map(_map), do: %{}
+  defp blank?(value), do: value in [nil, "", []]
+
+  attr :keys, :string, required: true
+  attr :label, :string, required: true
+
+  defp shortcut_row(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-4">
+      <span class="text-sm text-zinc-600">{@label}</span>
+      <kbd class="rounded-sm border border-zinc-200 bg-slate-50 px-2 py-1 font-mono text-xs text-zinc-700">
+        {@keys}
+      </kbd>
+    </div>
+    """
+  end
 end

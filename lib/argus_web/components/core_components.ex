@@ -32,7 +32,10 @@ defmodule ArgusWeb.CoreComponents do
     """
   end
 
-  attr :rest, :global, include: ~w(href navigate patch method download name value disabled type)
+  attr :rest, :global,
+    include:
+      ~w(href navigate patch method download name value disabled type title id phx-click phx-value-status phx-value-id phx-value-modal)
+
   attr :variant, :string, values: ~w(primary secondary ghost danger), default: "primary"
   attr :size, :string, values: ~w(xs sm md), default: "md"
   attr :class, :any, default: nil
@@ -61,6 +64,32 @@ defmodule ArgusWeb.CoreComponents do
       </button>
       """
     end
+  end
+
+  attr :rest, :global,
+    include:
+      ~w(type disabled title id phx-click phx-hook phx-value-status phx-value-id phx-value-modal data-copy-target data-copy-toast data-copy-label data-copied-label data-icon-only)
+
+  attr :class, :any, default: nil
+  attr :label, :string, required: true
+  attr :icon, :string, required: true
+  attr :variant, :string, values: ~w(secondary ghost danger), default: "secondary"
+
+  def icon_button(assigns) do
+    ~H"""
+    <button
+      aria-label={@label}
+      title={@label}
+      class={[
+        "inline-flex size-9 cursor-pointer items-center justify-center rounded-sm font-medium transition duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55",
+        icon_button_variant(@variant),
+        @class
+      ]}
+      {@rest}
+    >
+      <.icon name={@icon} class="size-4" />
+    </button>
+    """
   end
 
   attr :id, :any, default: nil
@@ -133,7 +162,7 @@ defmodule ArgusWeb.CoreComponents do
       <label
         :if={@label}
         for={@id}
-        class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500"
+        class="text-sm font-medium text-zinc-600"
       >
         {@label}
       </label>
@@ -163,7 +192,7 @@ defmodule ArgusWeb.CoreComponents do
       <label
         :if={@label}
         for={@id}
-        class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500"
+        class="text-sm font-medium text-zinc-600"
       >
         {@label}
       </label>
@@ -189,7 +218,7 @@ defmodule ArgusWeb.CoreComponents do
       <label
         :if={@label}
         for={@id}
-        class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500"
+        class="text-sm font-medium text-zinc-600"
       >
         {@label}
       </label>
@@ -252,7 +281,7 @@ defmodule ArgusWeb.CoreComponents do
     ~H"""
     <span class={[badge_variant(@kind), @class]}>
       <span class={["size-1.5 rounded-full", badge_dot(@kind)]} />
-      {render_slot(@inner_block)}
+      <span>{render_slot(@inner_block)}</span>
     </span>
     """
   end
@@ -284,10 +313,44 @@ defmodule ArgusWeb.CoreComponents do
       phx-hook={if @screenshot_mode?, do: nil, else: "RelativeTime"}
       phx-update={if @screenshot_mode?, do: nil, else: "ignore"}
       data-timestamp={to_iso8601(@at)}
-      title={if @screenshot_mode?, do: format_absolute(@at, "default"), else: nil}
+      title={format_absolute(@at, "default")}
     >
       {if @screenshot_mode?, do: format_absolute(@at, @format), else: format_relative(@at)}
     </time>
+    """
+  end
+
+  attr :values, :list, required: true
+  attr :kind, :string, default: "neutral"
+  attr :label, :string, default: "7-day occurrence trend"
+  attr :class, :any, default: nil
+
+  def sparkline(assigns) do
+    values = Enum.map(assigns.values || [], &normalize_sparkline_value/1)
+    max_value = Enum.max([1 | values])
+
+    bars =
+      Enum.map(values, fn value ->
+        height = if value == 0, do: 4, else: 18 + trunc(value / max_value * 26)
+        %{value: value, height: height}
+      end)
+
+    assigns = assign(assigns, :bars, bars)
+
+    ~H"""
+    <div
+      class={["inline-flex h-11 items-end gap-0.5", @class]}
+      role="img"
+      aria-label={@label}
+      title={@label}
+    >
+      <span
+        :for={bar <- @bars}
+        class={["w-1.5 rounded-t-sm", sparkline_bar_class(@kind)]}
+        style={"height: #{bar.height}px"}
+        title={"#{bar.value} occurrences"}
+      />
+    </div>
     """
   end
 
@@ -298,8 +361,8 @@ defmodule ArgusWeb.CoreComponents do
 
   def empty_state(assigns) do
     ~H"""
-    <div class="flex min-h-72 flex-col items-center justify-center border border-zinc-200 bg-white px-8 py-12 text-center">
-      <div class="flex h-14 w-14 items-center justify-center border border-zinc-200 bg-slate-50 text-zinc-300">
+    <div class="flex min-h-72 flex-col items-center justify-center rounded-sm border border-zinc-200 bg-white px-8 py-12 text-center shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+      <div class="flex h-14 w-14 items-center justify-center rounded-sm border border-zinc-200 bg-slate-50 text-zinc-300">
         <.icon name={@icon} class="size-7" />
       </div>
       <h2 class="text-xl font-semibold tracking-tight text-zinc-950">{@title}</h2>
@@ -322,7 +385,7 @@ defmodule ArgusWeb.CoreComponents do
 
   def table(assigns) do
     ~H"""
-    <div class={["border border-zinc-200 bg-white", @class]}>
+    <div class={["border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]", @class]}>
       <table class="min-w-full divide-y divide-zinc-200/80 text-sm">
         <thead class="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
           <tr>
@@ -333,7 +396,7 @@ defmodule ArgusWeb.CoreComponents do
           <tr
             :for={row <- @rows}
             id={@row_id && @row_id.(row)}
-            class="align-top text-zinc-700 transition hover:bg-slate-50"
+            class="align-top text-zinc-700 transition hover:bg-sky-50/45"
           >
             <td :for={col <- @col} class={["px-5 py-4", col[:class]]}>{render_slot(col, row)}</td>
           </tr>
@@ -488,6 +551,8 @@ defmodule ArgusWeb.CoreComponents do
         phx-hook="ClipboardCopy"
         data-copy-value={@value}
         data-copy-toast={@toast_message}
+        data-copy-label={@label || @value}
+        data-copied-label="Copied!"
         class={[
           "max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-zinc-500 transition hover:text-sky-700 hover:underline",
           @class
@@ -497,7 +562,7 @@ defmodule ArgusWeb.CoreComponents do
       </button>
     <% else %>
       <div class={[
-        "flex items-center gap-3 border border-zinc-200 bg-white px-4 py-3",
+        "flex items-center gap-3 border border-zinc-200 bg-slate-50 px-4 py-3",
         @class
       ]}>
         <code class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-700">
@@ -510,7 +575,9 @@ defmodule ArgusWeb.CoreComponents do
           phx-hook="ClipboardCopy"
           data-copy-value={@value}
           data-copy-toast={@toast_message}
-          class="cursor-pointer rounded-sm border border-zinc-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+          data-copy-label="Copy"
+          data-copied-label="Copied!"
+          class="cursor-pointer rounded-sm border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
         >
           Copy
         </button>
@@ -587,44 +654,185 @@ defmodule ArgusWeb.CoreComponents do
 
   defp button_variant("danger"), do: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-300"
 
+  defp icon_button_variant("ghost"),
+    do: "bg-transparent text-zinc-600 hover:bg-white hover:text-sky-700 focus:ring-sky-300"
+
+  defp icon_button_variant("danger"),
+    do: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-300"
+
+  defp icon_button_variant(_variant),
+    do:
+      "border border-zinc-200 bg-white text-zinc-700 shadow-[0_1px_0_rgba(15,23,42,0.03)] hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 focus:ring-sky-300"
+
   defp button_size("xs"), do: "px-2.5 py-1.5 text-xs"
   defp button_size("sm"), do: "px-3.5 py-2 text-xs"
   defp button_size("md"), do: "px-4.5 py-2.5 text-sm"
 
   defp badge_variant(kind) when kind in ["error", :error],
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-red-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-red-700"
+      "inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-red-700 ring-1 ring-red-100"
 
   defp badge_variant(kind) when kind in ["warning", :warning],
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-amber-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-amber-700"
+      "inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-amber-700 ring-1 ring-amber-100"
 
   defp badge_variant(kind) when kind in ["info", :info],
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-sky-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-sky-700"
+      "inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-sky-700 ring-1 ring-sky-100"
 
-  defp badge_variant(kind) when kind in ["resolved", :resolved],
-    do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700"
+  defp badge_variant(kind)
+       when kind in [
+              "resolved",
+              :resolved,
+              "active",
+              :active,
+              "handled",
+              :handled,
+              "configured",
+              :configured
+            ],
+       do:
+         "inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-emerald-700 ring-1 ring-emerald-100"
 
-  defp badge_variant(kind) when kind in ["ignored", :ignored],
+  defp badge_variant(kind) when kind in ["admin", :admin],
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600"
+      "inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-violet-700 ring-1 ring-violet-100"
 
-  defp badge_variant(kind) when kind in ["unresolved", :unresolved],
+  defp badge_variant(kind) when kind in ["ignored", :ignored, "member", :member],
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-red-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-red-700"
+      "inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-600 ring-1 ring-zinc-200"
+
+  defp badge_variant(kind) when kind in ["unresolved", :unresolved, "unhandled", :unhandled],
+    do:
+      "inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-red-700 ring-1 ring-red-100"
+
+  defp badge_variant(kind) when kind in ["pending", :pending, "not_configured", :not_configured],
+    do:
+      "inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-amber-700 ring-1 ring-amber-100"
 
   defp badge_variant(_kind),
     do:
-      "inline-flex items-center gap-1.5 rounded-sm bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600"
+      "inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-600 ring-1 ring-zinc-200"
 
-  defp badge_dot(kind) when kind in ["error", :error, "unresolved", :unresolved], do: "bg-red-500"
-  defp badge_dot(kind) when kind in ["warning", :warning], do: "bg-amber-500"
+  defp badge_dot(kind)
+       when kind in ["error", :error, "unresolved", :unresolved, "unhandled", :unhandled],
+       do: "bg-red-500"
+
+  defp badge_dot(kind)
+       when kind in ["warning", :warning, "pending", :pending, "not_configured", :not_configured],
+       do: "bg-amber-500"
+
   defp badge_dot(kind) when kind in ["info", :info], do: "bg-sky-500"
-  defp badge_dot(kind) when kind in ["resolved", :resolved], do: "bg-emerald-500"
+
+  defp badge_dot(kind)
+       when kind in [
+              "resolved",
+              :resolved,
+              "active",
+              :active,
+              "handled",
+              :handled,
+              "configured",
+              :configured
+            ],
+       do: "bg-emerald-500"
+
+  defp badge_dot(kind) when kind in ["admin", :admin], do: "bg-violet-500"
   defp badge_dot(kind) when kind in ["ignored", :ignored], do: "bg-zinc-400"
   defp badge_dot(_kind), do: "bg-zinc-400"
+
+  def project_initial(%{name: name}) when is_binary(name) do
+    name
+    |> String.trim()
+    |> String.first()
+    |> case do
+      nil -> "?"
+      initial -> String.upcase(initial)
+    end
+  end
+
+  def project_initial(_project), do: "?"
+
+  def project_accent(%{accent_color: color})
+      when color in ~w(sky emerald amber rose violet cyan zinc),
+      do: color
+
+  def project_accent(project) do
+    case rem(:erlang.phash2({project.slug, project.name}), 6) do
+      0 -> "sky"
+      1 -> "emerald"
+      2 -> "amber"
+      3 -> "rose"
+      4 -> "violet"
+      _ -> "cyan"
+    end
+  end
+
+  def project_avatar_class(project) do
+    case project_accent(project) do
+      "sky" -> "border-sky-500/30 bg-sky-500/12 text-sky-300"
+      "emerald" -> "border-emerald-500/30 bg-emerald-500/12 text-emerald-300"
+      "amber" -> "border-amber-500/30 bg-amber-500/12 text-amber-300"
+      "rose" -> "border-rose-500/30 bg-rose-500/12 text-rose-300"
+      "violet" -> "border-violet-500/30 bg-violet-500/12 text-violet-300"
+      "cyan" -> "border-cyan-500/30 bg-cyan-500/12 text-cyan-300"
+      _ -> "border-zinc-500/30 bg-zinc-500/12 text-zinc-300"
+    end
+  end
+
+  def project_light_avatar_class(project) do
+    case project_accent(project) do
+      "sky" -> "border-sky-200 bg-sky-50 text-sky-700"
+      "emerald" -> "border-emerald-200 bg-emerald-50 text-emerald-700"
+      "amber" -> "border-amber-200 bg-amber-50 text-amber-700"
+      "rose" -> "border-rose-200 bg-rose-50 text-rose-700"
+      "violet" -> "border-violet-200 bg-violet-50 text-violet-700"
+      "cyan" -> "border-cyan-200 bg-cyan-50 text-cyan-700"
+      _ -> "border-zinc-200 bg-zinc-50 text-zinc-700"
+    end
+  end
+
+  def project_accent_border_class(project) do
+    case project_accent(project) do
+      "sky" -> "border-t-sky-500"
+      "emerald" -> "border-t-emerald-500"
+      "amber" -> "border-t-amber-500"
+      "rose" -> "border-t-rose-500"
+      "violet" -> "border-t-violet-500"
+      "cyan" -> "border-t-cyan-500"
+      _ -> "border-t-zinc-500"
+    end
+  end
+
+  def accent_options do
+    [
+      {"Sky", "sky"},
+      {"Emerald", "emerald"},
+      {"Amber", "amber"},
+      {"Rose", "rose"},
+      {"Violet", "violet"},
+      {"Cyan", "cyan"},
+      {"Neutral", "zinc"}
+    ]
+  end
+
+  def accent_swatch_class("sky"), do: "bg-sky-500 ring-sky-200"
+  def accent_swatch_class("emerald"), do: "bg-emerald-500 ring-emerald-200"
+  def accent_swatch_class("amber"), do: "bg-amber-500 ring-amber-200"
+  def accent_swatch_class("rose"), do: "bg-rose-500 ring-rose-200"
+  def accent_swatch_class("violet"), do: "bg-violet-500 ring-violet-200"
+  def accent_swatch_class("cyan"), do: "bg-cyan-500 ring-cyan-200"
+  def accent_swatch_class(_), do: "bg-zinc-500 ring-zinc-200"
+
+  defp sparkline_bar_class("error"), do: "bg-red-400"
+  defp sparkline_bar_class("warning"), do: "bg-amber-400"
+  defp sparkline_bar_class("info"), do: "bg-sky-400"
+  defp sparkline_bar_class("resolved"), do: "bg-emerald-400"
+  defp sparkline_bar_class(_kind), do: "bg-zinc-300"
+
+  defp normalize_sparkline_value(value) when is_integer(value) and value >= 0, do: value
+  defp normalize_sparkline_value(value) when is_integer(value), do: max(value, 0)
+  defp normalize_sparkline_value(_value), do: 0
 
   defp toast_icon(:info), do: "hero-information-circle"
   defp toast_icon(:error), do: "hero-exclamation-circle"

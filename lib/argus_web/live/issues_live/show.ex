@@ -12,19 +12,21 @@ defmodule ArgusWeb.IssuesLive.Show do
         {@issue.title}
         <:subtitle>{@issue.culprit || "No culprit captured"}</:subtitle>
         <:actions>
-          <button
+          <.button navigate={~p"/projects/#{@project.slug}/issues"} variant="ghost" size="sm">
+            <.icon name="hero-arrow-left-mini" class="size-4" /> Back to issues
+          </.button>
+          <.icon_button
             id="copy-issue-button"
             type="button"
+            label="Copy issue"
+            icon="hero-clipboard-document-list-mini"
             phx-hook="ClipboardCopy"
             data-copy-target="#issue-copy-text"
             data-copy-toast="Issue copied"
-            class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-sm border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-900 shadow-[0_1px_0_rgba(15,23,42,0.03)] transition duration-150 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2"
-          >
-            <.icon name="hero-clipboard-document-list-mini" class="size-4" /> Copy issue
-          </button>
-          <.button navigate={~p"/projects/#{@project.slug}/issues"} variant="ghost" size="sm">
-            Back to issues
-          </.button>
+            data-copy-label="Copy issue"
+            data-copied-label="Copied!"
+            data-icon-only="true"
+          />
           <.button
             :if={@issue.status != :unresolved}
             phx-click="set-status"
@@ -38,7 +40,7 @@ defmodule ArgusWeb.IssuesLive.Show do
             :if={@issue.status != :resolved}
             phx-click="set-status"
             phx-value-status="resolved"
-            variant="secondary"
+            variant="primary"
             size="sm"
           >
             Resolve
@@ -47,7 +49,7 @@ defmodule ArgusWeb.IssuesLive.Show do
             :if={@issue.status != :ignored}
             phx-click="set-status"
             phx-value-status="ignored"
-            variant="danger"
+            variant="secondary"
             size="sm"
           >
             Ignore
@@ -57,9 +59,13 @@ defmodule ArgusWeb.IssuesLive.Show do
 
       <textarea id="issue-copy-text" class="sr-only" readonly>{@copy_text}</textarea>
 
-      <section class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_22rem]">
+      <section
+        id="issue-detail-shortcuts"
+        phx-hook="KeyboardShortcuts"
+        class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_22rem]"
+      >
         <div class="space-y-6">
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="flex flex-wrap items-center gap-3">
                 <.badge kind={@issue.level}>{@issue.level}</.badge>
@@ -88,7 +94,7 @@ defmodule ArgusWeb.IssuesLive.Show do
                   variant="ghost"
                   size="sm"
                 >
-                  Newer
+                  <.icon name="hero-chevron-left-mini" class="size-4" /> Newer
                 </.button>
                 <div
                   id="issue-event-position"
@@ -104,13 +110,13 @@ defmodule ArgusWeb.IssuesLive.Show do
                   variant="ghost"
                   size="sm"
                 >
-                  Older
+                  Older <.icon name="hero-chevron-right-mini" class="size-4" />
                 </.button>
               </div>
             </div>
           </section>
 
-          <section class="border border-zinc-200 bg-white">
+          <section class="border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="flex flex-wrap items-center gap-5 border-b border-zinc-200 px-6 pt-4">
               <.link
                 id="issue-event-tab"
@@ -224,15 +230,13 @@ defmodule ArgusWeb.IssuesLive.Show do
                         <div class="flex flex-wrap gap-2">
                           <.badge
                             :if={handled_exception?(@selected_occurrence)}
-                            kind="resolved"
-                            class="bg-emerald-50 text-emerald-700"
+                            kind="handled"
                           >
                             handled
                           </.badge>
                           <.badge
                             :if={!handled_exception?(@selected_occurrence)}
-                            kind="error"
-                            class="bg-red-50 text-red-700"
+                            kind="unhandled"
                           >
                             unhandled
                           </.badge>
@@ -415,12 +419,9 @@ defmodule ArgusWeb.IssuesLive.Show do
                                     breadcrumb["type"] ||
                                     "Breadcrumb"}
                                 </p>
-                                <span
-                                  :if={breadcrumb["category"] == "query"}
-                                  class="border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700"
-                                >
+                                <.badge :if={breadcrumb["category"] == "query"} kind="warning">
                                   query
-                                </span>
+                                </.badge>
                               </div>
                               <p class="font-mono text-xs text-zinc-500">
                                 {[breadcrumb["type"], breadcrumb["category"]]
@@ -488,9 +489,12 @@ defmodule ArgusWeb.IssuesLive.Show do
         </div>
 
         <aside class="space-y-6">
-          <section id="issue-assignee-panel" class="border border-zinc-200 bg-white p-5">
+          <section
+            id="issue-assignee-panel"
+            class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+          >
             <div class="space-y-1">
-              <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+              <h2 class="text-sm font-semibold text-zinc-950">
                 Assignee
               </h2>
               <p class="text-sm leading-6 text-zinc-500">
@@ -499,16 +503,6 @@ defmodule ArgusWeb.IssuesLive.Show do
             </div>
 
             <div class="mt-4 space-y-4">
-              <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-sm font-medium text-zinc-950">{assignee_name(@issue.assignee)}</p>
-                <p :if={@issue.assignee} class="mt-1 text-sm text-zinc-500">
-                  {@issue.assignee.email}
-                </p>
-                <p :if={is_nil(@issue.assignee)} class="mt-1 text-sm text-zinc-500">
-                  New and reappearing issues notify all confirmed team members.
-                </p>
-              </div>
-
               <.form
                 for={@assignee_form}
                 id="issue-assignee-form"
@@ -522,6 +516,9 @@ defmodule ArgusWeb.IssuesLive.Show do
                   options={@assignee_options}
                 />
               </.form>
+              <p class="text-xs leading-5 text-zinc-500">
+                Current: {assignee_name(@issue.assignee)}
+              </p>
             </div>
           </section>
 
@@ -573,6 +570,21 @@ defmodule ArgusWeb.IssuesLive.Show do
           <% end %>
         </aside>
       </section>
+
+      <.modal id="issue-shortcuts-modal" open={@shortcuts_modal_open} title="Keyboard shortcuts">
+        <div class="space-y-3">
+          <.shortcut_row keys="R" label="Resolve issue" />
+          <.shortcut_row keys="I" label="Ignore issue" />
+          <.shortcut_row keys="J" label="Older event" />
+          <.shortcut_row keys="K" label="Newer event" />
+          <.shortcut_row keys="G then I" label="Go to issues" />
+          <.shortcut_row keys="G then L" label="Go to logs" />
+          <.shortcut_row keys="?" label="Show shortcuts" />
+        </div>
+        <:actions>
+          <.button type="button" variant="ghost" phx-click="close-shortcuts">Close</.button>
+        </:actions>
+      </.modal>
     </Layouts.app>
     """
   end
@@ -645,6 +657,40 @@ defmodule ArgusWeb.IssuesLive.Show do
     end
   end
 
+  def handle_event("shortcut", %{"key" => "r"}, socket) do
+    shortcut_set_status(socket, "resolved")
+  end
+
+  def handle_event("shortcut", %{"key" => "i"}, socket) do
+    shortcut_set_status(socket, "ignored")
+  end
+
+  def handle_event("shortcut", %{"key" => "j"}, socket) do
+    shortcut_patch_occurrence(socket, socket.assigns.older_occurrence)
+  end
+
+  def handle_event("shortcut", %{"key" => "k"}, socket) do
+    shortcut_patch_occurrence(socket, socket.assigns.newer_occurrence)
+  end
+
+  def handle_event("shortcut", %{"key" => "g i"}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/projects/#{socket.assigns.project.slug}/issues")}
+  end
+
+  def handle_event("shortcut", %{"key" => "g l"}, socket) do
+    {:noreply, push_navigate(socket, to: ~p"/projects/#{socket.assigns.project.slug}/logs")}
+  end
+
+  def handle_event("shortcut", %{"key" => "help"}, socket) do
+    {:noreply, assign(socket, :shortcuts_modal_open, true)}
+  end
+
+  def handle_event("shortcut", _params, socket), do: {:noreply, socket}
+
+  def handle_event("close-shortcuts", _params, socket) do
+    {:noreply, assign(socket, :shortcuts_modal_open, false)}
+  end
+
   @impl true
   def handle_info({:error_event_updated, error_event}, socket) do
     if error_event.id == socket.assigns.issue.id do
@@ -682,6 +728,7 @@ defmodule ArgusWeb.IssuesLive.Show do
       surrounding_occurrences(occurrence_summaries, selected_occurrence_summary)
 
     socket
+    |> assign_new(:shortcuts_modal_open, fn -> false end)
     |> assign(:project, project)
     |> assign(:issue, issue)
     |> assign(:sidebar, AppShell.build(socket.assigns.current_scope.user, project: project))
@@ -763,6 +810,38 @@ defmodule ArgusWeb.IssuesLive.Show do
     do:
       ~p"/projects/#{project.slug}/issues/#{issue.id}?tab=#{tab}&event=#{occurrence_id}&frames=#{frame_mode}"
 
+  defp shortcut_set_status(socket, status) do
+    if to_string(socket.assigns.issue.status) == status do
+      {:noreply, socket}
+    else
+      {:ok, issue} =
+        Projects.update_error_event_status(socket.assigns.issue, String.to_existing_atom(status))
+
+      {:noreply,
+       assign_page(socket, socket.assigns.project, issue, %{
+         "tab" => socket.assigns.tab,
+         "event" => selected_occurrence_id(socket.assigns.selected_occurrence),
+         "frames" => socket.assigns.frame_mode
+       })}
+    end
+  end
+
+  defp shortcut_patch_occurrence(socket, nil), do: {:noreply, socket}
+
+  defp shortcut_patch_occurrence(socket, occurrence) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         issue_patch(
+           socket.assigns.project,
+           socket.assigns.issue,
+           "event",
+           occurrence.id,
+           socket.assigns.frame_mode
+         )
+     )}
+  end
+
   defp tab_class(true),
     do: "border-b-2 border-zinc-950 px-0 pb-3 text-sm font-medium text-zinc-950"
 
@@ -794,7 +873,7 @@ defmodule ArgusWeb.IssuesLive.Show do
               </p>
               <span
                 :if={@frame["in_app"]}
-                class="border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700"
+                class="rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.08em] text-sky-700"
               >
                 in app
               </span>
@@ -802,7 +881,7 @@ defmodule ArgusWeb.IssuesLive.Show do
             <p class="font-mono text-xs text-zinc-500">{frame_location(@frame)}</p>
           </div>
 
-          <span :if={@selected} class="text-xs font-medium uppercase tracking-[0.14em] text-sky-700">
+          <span :if={@selected} class="text-xs font-medium text-sky-700">
             selected frame
           </span>
         </div>
@@ -839,7 +918,7 @@ defmodule ArgusWeb.IssuesLive.Show do
 
             <div class="mt-4 space-y-3">
               <div :for={{key, value} <- map_entries(frame_vars(@frame))} class="space-y-1">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                <p class="text-xs font-medium text-zinc-500">
                   {labelize(key)}
                 </p>
                 <p class="break-words font-mono text-xs leading-6 text-zinc-700">
@@ -854,6 +933,20 @@ defmodule ArgusWeb.IssuesLive.Show do
     """
   end
 
+  attr :keys, :string, required: true
+  attr :label, :string, required: true
+
+  defp shortcut_row(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-4">
+      <span class="text-sm text-zinc-600">{@label}</span>
+      <kbd class="rounded-sm border border-zinc-200 bg-slate-50 px-2 py-1 font-mono text-xs text-zinc-700">
+        {@keys}
+      </kbd>
+    </div>
+    """
+  end
+
   attr :id, :string, default: nil
   attr :title, :string, required: true
   attr :data, :map, default: %{}
@@ -862,8 +955,11 @@ defmodule ArgusWeb.IssuesLive.Show do
 
   defp data_panel(assigns) do
     ~H"""
-    <section id={@id} class={["border border-zinc-200 bg-white p-5", @class]}>
-      <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{@title}</h2>
+    <section
+      id={@id}
+      class={["border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]", @class]}
+    >
+      <h2 class="text-sm font-semibold text-zinc-950">{@title}</h2>
 
       <%= if map_size(@data || %{}) == 0 do %>
         <p class="mt-4 text-sm leading-6 text-zinc-500">{@empty_text}</p>
@@ -913,7 +1009,7 @@ defmodule ArgusWeb.IssuesLive.Show do
             </details>
           <% true -> %>
             <div class="grid gap-1 sm:grid-cols-[112px_minmax(0,1fr)] sm:gap-4">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              <p class="text-xs font-medium text-zinc-500">
                 {labelize(key)}
               </p>
               <p class={value_text_class(value)} title={format_value(value)}>{format_value(value)}</p>

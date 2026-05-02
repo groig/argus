@@ -58,6 +58,33 @@ defmodule ArgusWeb.LogsLive.IndexTest do
     assert render(view) =~ "Tail log message"
   end
 
+  test "renders extracted metadata pills instead of raw metadata json", %{
+    conn: conn,
+    project: project
+  } do
+    _log =
+      log_fixture(project, %{
+        message: "Payment provider degraded",
+        metadata: %{
+          "attributes" => %{
+            "code.function_name" => "capture_payment",
+            "http.route" => "/checkout/charge",
+            "deployment.environment" => "production"
+          }
+        }
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.slug}/logs")
+
+    html = render(view)
+
+    assert html =~ "route"
+    assert html =~ "/checkout/charge"
+    assert html =~ "function"
+    assert html =~ "capture_payment"
+    refute html =~ ~s({"attributes")
+  end
+
   test "paginates the logs list", %{conn: conn, project: project} do
     base = ~U[2026-03-31 12:00:00Z]
 

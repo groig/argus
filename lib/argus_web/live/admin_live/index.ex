@@ -36,7 +36,7 @@ defmodule ArgusWeb.AdminLive.Index do
         </:actions>
       </.header>
 
-      <section class="border border-zinc-200 bg-white">
+      <section class="border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
         <div
           id="admin-tabs"
           class="flex flex-wrap items-center gap-5 border-b border-zinc-200 px-6 pt-4"
@@ -69,7 +69,7 @@ defmodule ArgusWeb.AdminLive.Index do
                 </:col>
                 <:col :let={user} label="Invited by">{latest_inviter_name(user)}</:col>
                 <:col :let={user} label="Status">
-                  <.badge kind={if user.confirmed_at, do: :resolved, else: :warning}>
+                  <.badge kind={if user.confirmed_at, do: :active, else: :pending}>
                     {if user.confirmed_at, do: "active", else: "pending"}
                   </.badge>
                 </:col>
@@ -81,10 +81,16 @@ defmodule ArgusWeb.AdminLive.Index do
                     phx-value-id={user.id}
                     icon="hero-cog-6-tooth-mini"
                   >
-                    Manage
+                    Edit user
                   </.action_button>
                 </:col>
               </.table>
+              <.empty_state
+                :if={length(@users) == 1}
+                title="Invite your team"
+                description="Invite your team to start collaborating."
+                icon="hero-user-plus"
+              />
             </div>
           <% end %>
 
@@ -99,9 +105,31 @@ defmodule ArgusWeb.AdminLive.Index do
 
               <.table id="admin-teams" rows={@teams}>
                 <:col :let={team} label="Name">{team.name}</:col>
-                <:col :let={team} label="Members">{length(team.team_members)}</:col>
+                <:col :let={team} label="Members">
+                  <div class="flex items-center gap-3">
+                    <div class="flex -space-x-2">
+                      <span
+                        :for={team_member <- Enum.take(team.team_members, 4)}
+                        title={team_member.user.name || team_member.user.email}
+                        class="flex size-7 items-center justify-center rounded-full border border-white bg-zinc-100 text-[11px] font-semibold uppercase text-zinc-700 ring-1 ring-zinc-200"
+                      >
+                        {String.first(team_member.user.name || team_member.user.email)}
+                      </span>
+                    </div>
+                    <span class="text-sm text-zinc-600">{length(team.team_members)}</span>
+                  </div>
+                </:col>
                 <:col :let={team} label="Projects">{Map.get(@team_project_counts, team.id, 0)}</:col>
-                <:col :let={team} label="Manage">
+                <:col :let={team} label="Health">
+                  <.badge kind={
+                    if Map.get(@team_unresolved_counts, team.id, 0) > 0,
+                      do: :unresolved,
+                      else: :resolved
+                  }>
+                    {Map.get(@team_unresolved_counts, team.id, 0)} unresolved
+                  </.badge>
+                </:col>
+                <:col :let={team} label="Actions">
                   <.action_button
                     navigate={~p"/teams/#{team.id}/settings?tab=projects"}
                     icon="hero-cog-6-tooth-mini"
@@ -196,23 +224,23 @@ defmodule ArgusWeb.AdminLive.Index do
         </.form>
       </.modal>
 
-      <.modal id="user-modal" open={@user_modal_open} title="Manage user">
+      <.modal id="user-modal" open={@user_modal_open} title="Edit user">
         <%= if @selected_user do %>
           <div class="space-y-6">
             <section class="grid gap-4 sm:grid-cols-2">
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   User
                 </p>
                 <p class="mt-2 text-sm font-medium text-zinc-950">{@selected_user.name}</p>
                 <p class="mt-1 text-sm text-zinc-500">{@selected_user.email}</p>
               </div>
               <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p class="text-sm font-medium text-zinc-500">
                   Status
                 </p>
                 <div class="mt-2">
-                  <.badge kind={if @selected_user.confirmed_at, do: :resolved, else: :warning}>
+                  <.badge kind={if @selected_user.confirmed_at, do: :active, else: :pending}>
                     {if @selected_user.confirmed_at, do: "active", else: "pending"}
                   </.badge>
                 </div>
@@ -608,6 +636,7 @@ defmodule ArgusWeb.AdminLive.Index do
     users = Accounts.list_users()
     teams = Teams.list_teams()
     selected_user = selected_user(users, socket.assigns[:selected_user_id])
+    project_stats = Projects.project_stats(projects)
 
     socket
     |> assign(:tab, socket.assigns[:tab] || "users")
@@ -616,11 +645,12 @@ defmodule ArgusWeb.AdminLive.Index do
     |> assign(:selected_user, selected_user)
     |> assign(:user_team_form, user_team_form(selected_user, teams))
     |> assign(:projects, projects)
-    |> assign(:project_stats, Projects.project_stats(projects))
+    |> assign(:project_stats, project_stats)
     |> assign(
       :team_project_counts,
       Enum.frequencies_by(projects, & &1.team_id)
     )
+    |> assign(:team_unresolved_counts, team_unresolved_counts(projects, project_stats))
   end
 
   defp latest_inviter_name(user) do
@@ -692,8 +722,15 @@ defmodule ArgusWeb.AdminLive.Index do
     |> Map.get(key, 0)
   end
 
+  defp team_unresolved_counts(projects, project_stats) do
+    Enum.reduce(projects, %{}, fn project, acc ->
+      unresolved_count = project_stat(project_stats, project.id, :unresolved_count)
+      Map.update(acc, project.team_id, unresolved_count, &(&1 + unresolved_count))
+    end)
+  end
+
   defp tab_class(true),
-    do: "border-b-2 border-zinc-950 px-0 pb-3 text-sm font-medium text-zinc-950"
+    do: "border-b-[3px] border-sky-600 px-0 pb-3 text-sm font-semibold text-zinc-950"
 
   defp tab_class(false),
     do:

@@ -27,7 +27,7 @@ defmodule ArgusWeb.TeamLive.Settings do
         </:actions>
       </.header>
 
-      <section class="border border-zinc-200 bg-white">
+      <section class="border border-zinc-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
         <div class="flex flex-wrap items-center gap-5 border-b border-zinc-200 px-6 pt-4">
           <.link
             patch={~p"/teams/#{@team.id}/settings?tab=projects"}
@@ -324,14 +324,14 @@ defmodule ArgusWeb.TeamLive.Settings do
 
   defp truncate_dsn(dsn) do
     if String.length(dsn) > 42 do
-      String.slice(dsn, 0, 42) <> "…"
+      String.slice(dsn, 0, 42) <> "..."
     else
       dsn
     end
   end
 
   defp tab_class(true),
-    do: "border-b-2 border-zinc-950 px-0 pb-3 text-sm font-medium text-zinc-950"
+    do: "border-b-[3px] border-sky-600 px-0 pb-3 text-sm font-semibold text-zinc-950"
 
   defp tab_class(false),
     do:

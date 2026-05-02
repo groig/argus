@@ -24,7 +24,7 @@ defmodule ArgusWeb.LogsLive.Show do
 
       <section class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_22rem]">
         <div class="space-y-6">
-          <section class="border border-zinc-200 bg-white p-6">
+          <section class="border border-zinc-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
             <div class="flex flex-wrap items-start justify-between gap-4">
               <div class="space-y-3">
                 <div class="flex flex-wrap items-center gap-3">
@@ -193,8 +193,11 @@ defmodule ArgusWeb.LogsLive.Show do
 
   defp data_panel(assigns) do
     ~H"""
-    <section id={@id} class="border border-zinc-200 bg-white p-5">
-      <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{@title}</h2>
+    <section
+      id={@id}
+      class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+    >
+      <h2 class="text-sm font-semibold text-zinc-950">{@title}</h2>
 
       <%= if map_size(@data || %{}) == 0 do %>
         <p class="mt-4 text-sm leading-6 text-zinc-500">{@empty_text}</p>
@@ -221,7 +224,7 @@ defmodule ArgusWeb.LogsLive.Show do
         ]}
       >
         <% {key, value} = entry %>
-        <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+        <p class="text-xs font-medium text-zinc-500">
           {labelize(key)}
         </p>
         <p class={sidebar_value_text_class(value)} title={format_value(value)}>
@@ -247,10 +250,10 @@ defmodule ArgusWeb.LogsLive.Show do
         <%= cond do %>
           <% is_map(value) and map_size(value) > 0 -> %>
             <div class="space-y-2">
-              <p class="font-mono text-xs leading-5 text-zinc-400">{display_key(key)}</p>
+              <p class="font-mono text-xs leading-5 text-zinc-500">{display_key(key)}</p>
               <details class="overflow-hidden rounded-md border border-zinc-200 bg-white">
                 <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-zinc-700">
-                  Open object
+                  Expand {labelize(key)}
                 </summary>
                 <div class="border-t border-zinc-100">
                   <.log_entries entries={map_entries(value)} />
@@ -259,7 +262,7 @@ defmodule ArgusWeb.LogsLive.Show do
             </div>
           <% is_list(value) and value != [] and Enum.all?(value, &is_map/1) -> %>
             <div class="space-y-2">
-              <p class="font-mono text-xs leading-5 text-zinc-400">{display_key(key)}</p>
+              <p class="font-mono text-xs leading-5 text-zinc-500">{display_key(key)}</p>
               <details class="overflow-hidden rounded-md border border-zinc-200 bg-white">
                 <summary class="cursor-pointer list-none px-4 py-3 text-sm font-medium text-zinc-700">
                   {length(value)} items
@@ -276,13 +279,13 @@ defmodule ArgusWeb.LogsLive.Show do
             </div>
           <% is_list(value) and value != [] -> %>
             <div class="space-y-2">
-              <p class="font-mono text-xs leading-5 text-zinc-400">{display_key(key)}</p>
+              <p class="font-mono text-xs leading-5 text-zinc-500">{display_key(key)}</p>
               <ul class="space-y-1.5 text-sm text-zinc-700">
                 <li :for={item <- value}>{format_value(item)}</li>
               </ul>
             </div>
           <% true -> %>
-            <p class="font-mono text-xs leading-5 text-zinc-400">{display_key(key)}</p>
+            <p class="font-mono text-xs leading-5 text-zinc-500">{display_key(key)}</p>
             <p class={value_text_class(value)} title={format_value(value)}>{format_value(value)}</p>
         <% end %>
       </div>
@@ -295,15 +298,18 @@ defmodule ArgusWeb.LogsLive.Show do
 
   defp identifier_panel(assigns) do
     ~H"""
-    <section id={@id} class="border border-zinc-200 bg-white p-5">
-      <h2 class="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Identifiers</h2>
+    <section
+      id={@id}
+      class="border border-zinc-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+    >
+      <h2 class="text-sm font-semibold text-zinc-950">Identifiers</h2>
 
       <div class="mt-4 space-y-3">
         <div
           :for={{label, value} <- @rows}
           class="grid gap-1 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-baseline sm:gap-4"
         >
-          <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+          <p class="text-xs font-medium text-zinc-500">
             {labelize(label)}
           </p>
           <%= if is_binary(value) do %>
