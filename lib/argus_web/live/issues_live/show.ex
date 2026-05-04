@@ -611,7 +611,9 @@ defmodule ArgusWeb.IssuesLive.Show do
   @impl true
   def handle_event("set-status", %{"status" => status}, socket) do
     {:ok, issue} =
-      Projects.update_error_event_status(socket.assigns.issue, String.to_existing_atom(status))
+      Projects.update_error_event_status(socket.assigns.issue, String.to_existing_atom(status),
+        actor: socket.assigns.current_scope.user
+      )
 
     {:noreply,
      assign_page(socket, socket.assigns.project, issue, %{
@@ -815,7 +817,9 @@ defmodule ArgusWeb.IssuesLive.Show do
       {:noreply, socket}
     else
       {:ok, issue} =
-        Projects.update_error_event_status(socket.assigns.issue, String.to_existing_atom(status))
+        Projects.update_error_event_status(socket.assigns.issue, String.to_existing_atom(status),
+          actor: socket.assigns.current_scope.user
+        )
 
       {:noreply,
        assign_page(socket, socket.assigns.project, issue, %{

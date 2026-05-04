@@ -319,7 +319,8 @@ defmodule ArgusWeb.IssuesLive.Index do
       Projects.bulk_update_error_event_status(
         socket.assigns.project,
         selected_ids,
-        String.to_existing_atom(status)
+        String.to_existing_atom(status),
+        actor: socket.assigns.current_scope.user
       )
     end
   end

@@ -97,6 +97,251 @@ defmodule Argus.Projects.IssueNotifierTest do
     end)
   end
 
+  test "delivers assignment notifications to the new assignee and posts assignment webhook metadata" do
+    %{team: team, project: project} = workspace_fixture()
+    actor = user_fixture(%{name: "Assigning User"})
+    assignee = user_fixture(%{name: "Assigned Person"})
+    fallback_member = user_fixture(%{name: "Fallback Member"})
+
+    membership_fixture(team, actor)
+    membership_fixture(team, assignee)
+    membership_fixture(team, fallback_member)
+
+    issue = insert_issue(project, assignee_id: assignee.id)
+    flush_emails()
+
+    project =
+      configure_webhook!(project, lifecycle_template())
+      |> Repo.preload(team: [team_members: :user])
+
+    issue = Repo.preload(issue, assignee: [], project: [team: [team_members: :user]])
+    issue = %{issue | project: project}
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(self(), {:webhook_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok =
+             IssueNotifier.deliver(issue, :assigned,
+               actor: actor,
+               change: %{field: :assignee_id, from: nil, to: assignee.id}
+             )
+
+    assert_email_sent(fn email ->
+      email.to == [{assignee.name, assignee.email}] and
+        email.subject =~ "Issue assigned" and
+        email.text_body =~ "Changed by: #{actor.name}"
+    end)
+
+    refute_email_sent(fn email ->
+      email.to == [{fallback_member.name, fallback_member.email}] and
+        email.subject =~ "Issue assigned"
+    end)
+
+    assert_receive {:webhook_request, payload}
+    assert payload["event"] == "issue_assigned"
+    assert payload["event_label"] == "An issue was assigned"
+    assert payload["actor_email"] == actor.email
+    assert payload["assignee_email"] == assignee.email
+    assert payload["change_field"] == "assignee_id"
+    assert payload["change_from"] == nil
+    assert payload["change_to"] == assignee.id
+  end
+
+  test "delivers unassignment notifications to confirmed team members and posts the webhook" do
+    %{team: team, project: project} = workspace_fixture()
+    actor = user_fixture(%{name: "Assigning User"})
+    assignee = user_fixture(%{name: "Assigned Person"})
+    confirmed_member = user_fixture(%{name: "Confirmed Member"})
+    pending_member = pending_user_fixture(%{name: "Pending Member"})
+
+    membership_fixture(team, actor)
+    membership_fixture(team, assignee)
+    membership_fixture(team, confirmed_member)
+    membership_fixture(team, pending_member)
+
+    issue = insert_issue(project)
+    flush_emails()
+
+    project =
+      configure_webhook!(project, lifecycle_template())
+      |> Repo.preload(team: [team_members: :user])
+
+    issue = Repo.preload(issue, assignee: [], project: [team: [team_members: :user]])
+    issue = %{issue | project: project}
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(self(), {:webhook_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok =
+             IssueNotifier.deliver(issue, :unassigned,
+               actor: actor,
+               change: %{field: :assignee_id, from: assignee.id, to: nil}
+             )
+
+    assert_email_sent(fn email ->
+      email.to == [{confirmed_member.name, confirmed_member.email}] and
+        email.subject =~ "Issue unassigned"
+    end)
+
+    refute_email_sent(fn email ->
+      email.to == [{pending_member.name, pending_member.email}] and
+        email.subject =~ "Issue unassigned"
+    end)
+
+    assert_receive {:webhook_request, payload}
+    assert payload["event"] == "issue_unassigned"
+    assert payload["actor_email"] == actor.email
+    assert payload["change_field"] == "assignee_id"
+    assert payload["change_from"] == assignee.id
+    assert payload["change_to"] == nil
+  end
+
+  test "delivers status notifications to the assignee and posts status webhook metadata" do
+    %{team: team, project: project} = workspace_fixture()
+    actor = user_fixture(%{name: "Resolving User"})
+    assignee = user_fixture(%{name: "Assigned Person"})
+    fallback_member = user_fixture(%{name: "Fallback Member"})
+
+    membership_fixture(team, actor)
+    membership_fixture(team, assignee)
+    membership_fixture(team, fallback_member)
+
+    issue = insert_issue(project, assignee_id: assignee.id)
+    flush_emails()
+
+    project =
+      configure_webhook!(project, lifecycle_template())
+      |> Repo.preload(team: [team_members: :user])
+
+    issue =
+      issue
+      |> Repo.preload(assignee: [], project: [team: [team_members: :user]])
+      |> Map.put(:status, :resolved)
+
+    issue = %{issue | project: project}
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(self(), {:webhook_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok =
+             IssueNotifier.deliver(issue, :resolved,
+               actor: actor,
+               change: %{field: :status, from: :unresolved, to: :resolved}
+             )
+
+    assert_email_sent(fn email ->
+      email.to == [{assignee.name, assignee.email}] and
+        email.subject =~ "Issue resolved" and
+        email.text_body =~ "Change: status from unresolved to resolved"
+    end)
+
+    refute_email_sent(fn email ->
+      email.to == [{fallback_member.name, fallback_member.email}] and
+        email.subject =~ "Issue resolved"
+    end)
+
+    assert_receive {:webhook_request, payload}
+    assert payload["event"] == "issue_resolved"
+    assert payload["actor_email"] == actor.email
+    assert payload["assignee_email"] == assignee.email
+    assert payload["change_field"] == "status"
+    assert payload["change_from"] == "unresolved"
+    assert payload["change_to"] == "resolved"
+  end
+
+  test "context assignment changes trigger targeted emails and webhooks" do
+    %{user: actor, team: team, project: project} = workspace_fixture()
+    assignee = user_fixture(%{name: "Assigned Person"})
+    fallback_member = user_fixture(%{name: "Fallback Member"})
+    membership_fixture(team, assignee)
+    membership_fixture(team, fallback_member)
+    issue = insert_issue(project)
+    flush_emails()
+
+    project = configure_webhook!(project, lifecycle_template())
+    test_pid = self()
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:webhook_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert {:ok, assigned_issue} =
+             Projects.assign_error_event(actor, issue, assignee.id, sync?: true)
+
+    assert assigned_issue.assignee_id == assignee.id
+
+    assert_email_sent(fn email ->
+      email.to == [{assignee.name, assignee.email}] and
+        email.subject =~ "Issue assigned"
+    end)
+
+    refute_email_sent(fn email ->
+      email.to == [{fallback_member.name, fallback_member.email}] and
+        email.subject =~ "Issue assigned"
+    end)
+
+    assert_receive {:webhook_request, payload}
+    assert payload["event"] == "issue_assigned"
+    assert payload["issue_id"] == assigned_issue.id
+    assert payload["actor_email"] == actor.email
+    assert payload["assignee_email"] == assignee.email
+    assert payload["change_to"] == assignee.id
+
+    assert project.id == assigned_issue.project_id
+  end
+
+  test "bulk status changes notify only changed issues" do
+    %{user: actor, project: project} = workspace_fixture()
+    unresolved_issue = insert_issue(project)
+    resolved_issue = insert_issue(project, fingerprint: "RuntimeError|resolved|billing.jobs.sync")
+
+    {:ok, resolved_issue} = Projects.update_error_event_status(resolved_issue, :resolved)
+    flush_emails()
+
+    project = configure_webhook!(project, lifecycle_template())
+    test_pid = self()
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:webhook_request, Jason.decode!(body)})
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert 1 =
+             Projects.bulk_update_error_event_status(
+               project,
+               [unresolved_issue.id, resolved_issue.id],
+               :resolved,
+               actor: actor,
+               sync?: true
+             )
+
+    assert_email_sent(fn email ->
+      email.to == [{actor.name, actor.email}] and
+        email.subject =~ "Issue resolved"
+    end)
+
+    assert_receive {:webhook_request, payload}
+    assert payload["event"] == "issue_resolved"
+    assert payload["issue_id"] == unresolved_issue.id
+    assert payload["actor_email"] == actor.email
+    assert payload["change_from"] == "unresolved"
+    assert payload["change_to"] == "resolved"
+
+    refute_receive {:webhook_request, _payload}
+  end
+
   test "does not post a webhook when the project has no webhook configured" do
     %{project: project} = workspace_fixture()
     issue = insert_issue(project)
@@ -144,7 +389,7 @@ defmodule Argus.Projects.IssueNotifierTest do
     timestamp = ~U[2026-03-28 22:00:00Z]
 
     issue_attrs = %{
-      fingerprint: "RuntimeError|boom|billing.jobs.sync",
+      fingerprint: Keyword.get(attrs, :fingerprint, "RuntimeError|boom|billing.jobs.sync"),
       title: "RuntimeError: boom",
       culprit: "billing.jobs.sync",
       level: :error,
@@ -210,5 +455,18 @@ defmodule Argus.Projects.IssueNotifierTest do
       })
 
     project
+  end
+
+  defp lifecycle_template do
+    ~s({
+      "event": "{{event}}",
+      "event_label": "{{event_label}}",
+      "issue_id": "{{issue.id}}",
+      "actor_email": "{{actor.email}}",
+      "assignee_email": "{{assignee.email}}",
+      "change_field": "{{change.field}}",
+      "change_from": "{{change.from}}",
+      "change_to": "{{change.to}}"
+    })
   end
 end

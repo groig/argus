@@ -382,39 +382,79 @@ defmodule Argus.Projects do
     }
   end
 
-  def update_error_event_status(%ErrorEvent{} = error_event, status) do
-    error_event
-    |> ErrorEvent.changeset(%{status: status})
-    |> Repo.update()
-    |> case do
-      {:ok, updated_error_event} ->
-        updated_error_event =
-          Repo.preload(updated_error_event, [:project, :assignee], force: true)
+  def update_error_event_status(%ErrorEvent{} = error_event, status, opts \\ []) do
+    if error_event.status == status do
+      {:ok, Repo.preload(error_event, [:project, :assignee], force: true)}
+    else
+      previous_status = error_event.status
 
-        broadcast_issue({:error_event_updated, updated_error_event})
-        {:ok, updated_error_event}
+      error_event
+      |> ErrorEvent.changeset(%{status: status})
+      |> Repo.update()
+      |> case do
+        {:ok, updated_error_event} ->
+          updated_error_event =
+            Repo.preload(updated_error_event, [:project, :assignee], force: true)
 
-      error ->
-        error
+          broadcast_issue({:error_event_updated, updated_error_event})
+
+          maybe_notify_issue(updated_error_event, status_event(status),
+            actor: Keyword.get(opts, :actor),
+            sync?: Keyword.get(opts, :sync?, false),
+            change: %{field: :status, from: previous_status, to: status}
+          )
+
+          {:ok, updated_error_event}
+
+        error ->
+          error
+      end
     end
   end
 
-  def bulk_update_error_event_status(%Project{id: project_id}, ids, status) do
+  def bulk_update_error_event_status(%Project{id: project_id}, ids, status, opts \\ []) do
     ids = Enum.uniq(ids)
 
-    {count, _} =
-      Repo.update_all(
-        from(error_event in ErrorEvent,
-          where: error_event.project_id == ^project_id and error_event.id in ^ids
-        ),
-        set: [status: status, updated_at: DateTime.utc_now(:second)]
+    changes =
+      Repo.all(
+        from error_event in ErrorEvent,
+          where:
+            error_event.project_id == ^project_id and error_event.id in ^ids and
+              error_event.status != ^status,
+          select: {error_event.id, error_event.status}
       )
 
+    changed_ids = Enum.map(changes, &elem(&1, 0))
+    previous_status_by_id = Map.new(changes)
+
+    {count, _} =
+      if changed_ids == [] do
+        {0, nil}
+      else
+        Repo.update_all(
+          from(error_event in ErrorEvent, where: error_event.id in ^changed_ids),
+          set: [status: status, updated_at: DateTime.utc_now(:second)]
+        )
+      end
+
     from(error_event in ErrorEvent,
-      where: error_event.project_id == ^project_id and error_event.id in ^ids
+      where: error_event.id in ^changed_ids,
+      preload: [:project, :assignee]
     )
     |> Repo.all()
-    |> Enum.each(fn error_event -> broadcast_issue({:error_event_updated, error_event}) end)
+    |> Enum.each(fn error_event ->
+      broadcast_issue({:error_event_updated, error_event})
+
+      maybe_notify_issue(error_event, status_event(status),
+        actor: Keyword.get(opts, :actor),
+        sync?: Keyword.get(opts, :sync?, false),
+        change: %{
+          field: :status,
+          from: Map.fetch!(previous_status_by_id, error_event.id),
+          to: status
+        }
+      )
+    end)
 
     count
   end
@@ -430,22 +470,22 @@ defmodule Argus.Projects do
     )
   end
 
-  def assign_error_event(%User{} = actor, %ErrorEvent{} = error_event, assignee_id)
+  def assign_error_event(%User{} = actor, %ErrorEvent{} = error_event, assignee_id, opts \\ [])
       when is_integer(assignee_id) do
     with {:ok, project} <- fetch_project_for_issue(error_event),
          :ok <- authorize_issue_assignment(actor, project),
          %User{} = assignee <- assignable_user(project, assignee_id) do
-      update_issue_assignee(error_event, assignee.id)
+      update_issue_assignee(error_event, assignee.id, actor, opts)
     else
       {:error, _reason} = error -> error
       nil -> {:error, :invalid_assignee}
     end
   end
 
-  def unassign_error_event(%User{} = actor, %ErrorEvent{} = error_event) do
+  def unassign_error_event(%User{} = actor, %ErrorEvent{} = error_event, opts \\ []) do
     with {:ok, project} <- fetch_project_for_issue(error_event),
          :ok <- authorize_issue_assignment(actor, project) do
-      update_issue_assignee(error_event, nil)
+      update_issue_assignee(error_event, nil, actor, opts)
     end
   end
 
@@ -666,13 +706,24 @@ defmodule Argus.Projects do
     |> repo.update()
   end
 
-  defp maybe_notify_issue(error_event, disposition) when disposition in [:created, :reopened] do
+  defp maybe_notify_issue(error_event, event, opts \\ [])
+
+  defp maybe_notify_issue(error_event, event, opts)
+       when event in [
+              :created,
+              :reopened,
+              :assigned,
+              :unassigned,
+              :resolved,
+              :ignored,
+              :unresolved
+            ] do
     error_event
     |> Repo.preload(assignee: [], project: [team: [team_members: :user]])
-    |> IssueNotifier.notify_async(disposition)
+    |> IssueNotifier.notify_async(event, opts)
   end
 
-  defp maybe_notify_issue(_error_event, _disposition), do: :ok
+  defp maybe_notify_issue(_error_event, _event, _opts), do: :ok
 
   defp fetch_project_for_issue(%ErrorEvent{project: %Project{} = project}), do: {:ok, project}
 
@@ -700,20 +751,39 @@ defmodule Argus.Projects do
     )
   end
 
-  defp update_issue_assignee(%ErrorEvent{} = error_event, assignee_id) do
-    error_event
-    |> ErrorEvent.changeset(%{assignee_id: assignee_id})
-    |> Repo.update()
-    |> case do
-      {:ok, updated_issue} ->
-        updated_issue = Repo.preload(updated_issue, [:project, :assignee], force: true)
-        broadcast_issue({:error_event_updated, updated_issue})
-        {:ok, updated_issue}
+  defp update_issue_assignee(%ErrorEvent{} = error_event, assignee_id, actor, opts) do
+    if error_event.assignee_id == assignee_id do
+      {:ok, Repo.preload(error_event, [:project, :assignee], force: true)}
+    else
+      previous_assignee_id = error_event.assignee_id
 
-      error ->
-        error
+      error_event
+      |> ErrorEvent.changeset(%{assignee_id: assignee_id})
+      |> Repo.update()
+      |> case do
+        {:ok, updated_issue} ->
+          updated_issue = Repo.preload(updated_issue, [:project, :assignee], force: true)
+          event = if is_nil(assignee_id), do: :unassigned, else: :assigned
+
+          broadcast_issue({:error_event_updated, updated_issue})
+
+          maybe_notify_issue(updated_issue, event,
+            actor: actor,
+            sync?: Keyword.get(opts, :sync?, false),
+            change: %{field: :assignee_id, from: previous_assignee_id, to: assignee_id}
+          )
+
+          {:ok, updated_issue}
+
+        error ->
+          error
+      end
     end
   end
+
+  defp status_event(:resolved), do: :resolved
+  defp status_event(:ignored), do: :ignored
+  defp status_event(:unresolved), do: :unresolved
 
   defp issue_topic(project_id), do: "project:#{project_id}:issues"
 
