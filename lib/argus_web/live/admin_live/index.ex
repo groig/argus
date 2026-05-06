@@ -46,6 +46,9 @@ defmodule ArgusWeb.AdminLive.Index do
           <.link patch={~p"/admin?tab=projects"} class={tab_class(@tab == "projects")}>
             Projects
           </.link>
+          <.link patch={~p"/admin?tab=system"} class={tab_class(@tab == "system")}>
+            System
+          </.link>
         </div>
 
         <div class="p-6">
@@ -181,6 +184,35 @@ defmodule ArgusWeb.AdminLive.Index do
                   </div>
                 </:col>
               </.table>
+            </div>
+          <% end %>
+
+          <%= if @tab == "system" do %>
+            <div class="space-y-4">
+              <div>
+                <h2 class="text-lg font-semibold tracking-tight text-zinc-950">System</h2>
+                <p class="mt-1 text-sm text-zinc-500">
+                  Runtime version details for the deployed Argus instance.
+                </p>
+              </div>
+
+              <section
+                id="system-version"
+                class="grid gap-4 border border-zinc-200 bg-slate-50 p-4 sm:grid-cols-2"
+              >
+                <div>
+                  <p class="text-xs font-semibold uppercase text-zinc-500">Application version</p>
+                  <p id="system-app-version" class="mt-2 font-mono text-sm text-zinc-950">
+                    {@system_version.app}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs font-semibold uppercase text-zinc-500">Git revision</p>
+                  <p id="system-revision" class="mt-2 font-mono text-sm text-zinc-950">
+                    {@system_version.revision}
+                  </p>
+                </div>
+              </section>
             </div>
           <% end %>
         </div>
@@ -646,6 +678,7 @@ defmodule ArgusWeb.AdminLive.Index do
     |> assign(:user_team_form, user_team_form(selected_user, teams))
     |> assign(:projects, projects)
     |> assign(:project_stats, project_stats)
+    |> assign(:system_version, system_version())
     |> assign(
       :team_project_counts,
       Enum.frequencies_by(projects, & &1.team_id)
@@ -662,8 +695,15 @@ defmodule ArgusWeb.AdminLive.Index do
     end
   end
 
-  defp normalize_tab(tab) when tab in ~w(users teams projects), do: tab
+  defp normalize_tab(tab) when tab in ~w(users teams projects system), do: tab
   defp normalize_tab(_), do: "users"
+
+  defp system_version do
+    %{
+      app: Application.spec(:argus, :vsn) |> to_string(),
+      revision: System.get_env("ARGUS_REVISION", "unknown")
+    }
+  end
 
   defp user_role_form(user) do
     to_form(%{"user_id" => user.id, "role" => to_string(user.role)}, as: :user_role)

@@ -27,6 +27,19 @@ defmodule ArgusWeb.AdminLive.IndexTest do
     assert has_element?(view, "#team-form")
   end
 
+  test "renders system version details for global admins", %{conn: conn} do
+    admin = admin_fixture()
+
+    {:ok, view, _html} =
+      conn
+      |> log_in_user(admin)
+      |> live(~p"/admin?tab=system")
+
+    assert has_element?(view, "#system-version")
+    assert has_element?(view, "#system-app-version", to_string(Application.spec(:argus, :vsn)))
+    assert has_element?(view, "#system-revision")
+  end
+
   test "updates another user's global role from the users table", %{conn: conn} do
     admin = admin_fixture()
     member = user_fixture()
