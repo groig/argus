@@ -62,7 +62,9 @@ Each context owns a different kind of rule. `Ingest` handles payload shape and S
 ### Error Events
 
 1. The ingest plug validates the DSN key before controller work.
-2. `Argus.Ingest` decodes the request body and normalizes Sentry payloads.
+2. `Argus.Ingest` decodes the request body, recursively filters credentials, and normalizes
+   Sentry payloads. Sanitization happens before grouping or persistence so raw occurrences,
+   logs, metrics, notifications, and clipboard output only consume the filtered payload.
 3. `Argus.Projects.upsert_issue_and_occurrence/3` creates or updates the grouped issue and inserts the raw occurrence.
 4. The issue lifecycle outcome is explicit:
    - `:created`

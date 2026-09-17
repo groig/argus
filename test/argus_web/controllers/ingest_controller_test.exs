@@ -46,6 +46,95 @@ defmodule ArgusWeb.IngestControllerTest do
       assert occurrence.event_id == event_id
     end
 
+    test "filters nested credentials before issue and occurrence storage", %{
+      conn: conn,
+      project: project
+    } do
+      event_id = "b2f0e6085df44ef7a7c8a67cc55c1234"
+
+      payload =
+        error_payload(event_id, %{
+          "request" => %{
+            "url" => "https://example.com/jobs/1?access_token=query-secret&view=full",
+            "headers" => %{"Authorization" => "Bearer header-secret"}
+          },
+          "extra" => %{"database" => %{"password" => "extra-secret"}},
+          "exception" => %{
+            "values" => [
+              %{
+                "type" => "RuntimeError",
+                "value" => "boom",
+                "stacktrace" => %{
+                  "frames" => [
+                    %{
+                      "filename" => "job.ex",
+                      "function" => "perform",
+                      "lineno" => 12,
+                      "vars" => %{
+                        "conn_params" => %{
+                          "host" => "db.example.com",
+                          "password" => "frame-secret"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          ~p"/api/#{project.id}/store/?sentry_key=#{project.dsn_key}",
+          Jason.encode!(payload)
+        )
+
+      assert %{"id" => ^event_id} = json_response(conn, 200)
+
+      issue =
+        Repo.one!(from error_event in ErrorEvent, where: error_event.project_id == ^project.id)
+
+      occurrence =
+        Repo.one!(
+          from error_occurrence in ErrorOccurrence,
+            where: error_occurrence.error_event_id == ^issue.id
+        )
+
+      assert issue.request["headers"]["Authorization"] == "[Filtered]"
+
+      assert issue.request["url"] ==
+               "https://example.com/jobs/1?access_token=[Filtered]&view=full"
+
+      assert issue.extra["database"]["password"] == "[Filtered]"
+
+      assert get_in(occurrence.exception_values, [
+               Access.at(0),
+               "stacktrace",
+               "frames",
+               Access.at(0),
+               "vars",
+               "conn_params",
+               "password"
+             ]) == "[Filtered]"
+
+      assert get_in(occurrence.raw_payload, ["extra", "database", "password"]) == "[Filtered]"
+
+      assert get_in(occurrence.raw_payload, [
+               "exception",
+               "values",
+               Access.at(0),
+               "stacktrace",
+               "frames",
+               Access.at(0),
+               "vars",
+               "conn_params",
+               "password"
+             ]) == "[Filtered]"
+    end
+
     test "upserts by fingerprint and increments occurrence count", %{conn: conn, project: project} do
       first = error_payload("11111111111111111111111111111111")
       second = error_payload("22222222222222222222222222222222")
@@ -137,7 +226,11 @@ defmodule ArgusWeb.IngestControllerTest do
         %{
           "timestamp" => 1_778_091_981.028,
           "category" => "navigation",
-          "data" => %{"from" => "/test", "to" => "/test"}
+          "data" => %{
+            "from" => "/test",
+            "to" => "/test",
+            "authorization" => "Bearer breadcrumb-secret"
+          }
         },
         %{
           "timestamp" => 1_778_092_141.755,
@@ -164,7 +257,8 @@ defmodule ArgusWeb.IngestControllerTest do
                       "filename" => "pages\\test\\index.js",
                       "function" => "throwClientError",
                       "in_app" => true,
-                      "lineno" => 24
+                      "lineno" => 24,
+                      "vars" => %{"token" => "frame-secret"}
                     }
                   ]
                 }
@@ -202,7 +296,20 @@ defmodule ArgusWeb.IngestControllerTest do
         )
 
       assert issue.title == "Error: Sentry test client error from /test page"
-      assert occurrence.breadcrumbs == Enum.filter(breadcrumbs, &is_map/1)
+
+      assert get_in(occurrence.breadcrumbs, [Access.at(0), "data", "authorization"]) ==
+               "[Filtered]"
+
+      assert get_in(occurrence.breadcrumbs, [Access.at(0), "data", "from"]) == "/test"
+
+      assert get_in(occurrence.exception_values, [
+               Access.at(0),
+               "stacktrace",
+               "frames",
+               Access.at(0),
+               "vars",
+               "token"
+             ]) == "[Filtered]"
     end
 
     test "creates log events from envelope log items", %{conn: conn, project: project} do
@@ -212,13 +319,15 @@ defmodule ArgusWeb.IngestControllerTest do
             %{
               "timestamp" => DateTime.to_iso8601(DateTime.utc_now(:second)),
               "level" => "warning",
-              "body" => "disk nearly full",
+              "body" =>
+                "database unavailable at postgresql://worker:log-secret@db.example.com/app",
               "trace_id" => "trace-1",
               "span_id" => "span-1",
               "attributes" => %{
                 "logger.name" => "Argus.Logger",
                 "sentry.environment" => "test",
-                "sentry.sdk.name" => "sentry-elixir"
+                "sentry.sdk.name" => "sentry-elixir",
+                "db.password" => "attribute-secret"
               }
             }
           ]
@@ -238,9 +347,12 @@ defmodule ArgusWeb.IngestControllerTest do
       log_event =
         Repo.one!(from(log_event in LogEvent, where: log_event.project_id == ^project.id))
 
-      assert log_event.message == "disk nearly full"
+      assert log_event.message ==
+               "database unavailable at postgresql://worker:[Filtered]@db.example.com/app"
+
       assert log_event.level == :warning
       assert log_event.logger_name == "Argus.Logger"
+      assert log_event.metadata["attributes"]["db.password"] == "[Filtered]"
     end
 
     test "creates log events from python sdk log envelopes with typed attributes", %{
@@ -325,7 +437,12 @@ defmodule ArgusWeb.IngestControllerTest do
               "unit" => "item",
               "attributes" => %{
                 "queue" => %{"value" => "default", "type" => "string"},
-                "active" => %{"value" => true, "type" => "boolean"}
+                "active" => %{"value" => true, "type" => "boolean"},
+                "api_key" => %{"value" => "metric-secret", "type" => "string"},
+                "database_url" => %{
+                  "value" => "postgresql://worker:metric-url-secret@db.example.com/app",
+                  "type" => "string"
+                }
               }
             },
             %{"name" => "ignored.metric", "type" => "set", "value" => 1}
@@ -362,7 +479,18 @@ defmodule ArgusWeb.IngestControllerTest do
       assert metric_point.unit == "item"
       assert metric_point.trace_id == "bb8e667ffaba4703bb9b10bc5ff7099f"
       assert metric_point.span_id == "b8a25c2fa7e15e4c"
-      assert metric_point.attributes == %{"queue" => "default", "active" => true}
+
+      assert metric_point.attributes == %{
+               "queue" => "default",
+               "active" => true,
+               "api_key" => "[Filtered]",
+               "database_url" => "postgresql://worker:[Filtered]@db.example.com/app"
+             }
+
+      assert get_in(metric_point.raw_payload, ["attributes", "api_key"]) == "[Filtered]"
+
+      assert get_in(metric_point.raw_payload, ["attributes", "database_url", "value"]) ==
+               "postgresql://worker:[Filtered]@db.example.com/app"
     end
 
     test "accepts brotli-compressed envelopes", %{conn: conn, project: project} do

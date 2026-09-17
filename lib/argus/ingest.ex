@@ -7,7 +7,7 @@ defmodule Argus.Ingest do
   responses that would trigger retries. Grouping and issue lifecycle stay in `Argus.Projects`.
   """
 
-  alias Argus.Ingest.Envelope
+  alias Argus.Ingest.{Envelope, Scrubber}
   alias Argus.Logs
   alias Argus.Metrics
   alias Argus.Projects
@@ -112,6 +112,7 @@ defmodule Argus.Ingest do
     event_payload =
       payload
       |> Map.new()
+      |> Scrubber.scrub()
       |> Map.put_new("event_id", generate_event_id())
 
     issue_attrs = build_issue_attrs(event_payload)
@@ -146,6 +147,7 @@ defmodule Argus.Ingest do
               |> case do
                 {:ok, payload} when is_map(payload) ->
                   payload
+                  |> Scrubber.scrub()
                   |> Map.put_new("event_id", envelope_event_id || generate_event_id())
 
                 _ ->
@@ -160,7 +162,8 @@ defmodule Argus.Ingest do
           type == "log" ->
             case decode_json_payload(item.payload) do
               {:ok, payload} when is_map(payload) ->
-                {event_payload, minidump_attachment, [payload | log_payloads], metric_payloads}
+                {event_payload, minidump_attachment, [Scrubber.scrub(payload) | log_payloads],
+                 metric_payloads}
 
               _ ->
                 {event_payload, minidump_attachment, log_payloads, metric_payloads}
@@ -169,7 +172,8 @@ defmodule Argus.Ingest do
           type == "trace_metric" ->
             case decode_json_payload(item.payload) do
               {:ok, payload} when is_map(payload) ->
-                {event_payload, minidump_attachment, log_payloads, [payload | metric_payloads]}
+                {event_payload, minidump_attachment, log_payloads,
+                 [Scrubber.scrub(payload) | metric_payloads]}
 
               _ ->
                 {event_payload, minidump_attachment, log_payloads, metric_payloads}
