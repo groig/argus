@@ -26,19 +26,21 @@ Each deployment hosts one internal workspace. Admins invite users, teams own pro
 
 For local development:
 
-1. Install dependencies and prepare the database:
+1. Install Elixir, Erlang/OTP, and PostgreSQL. The versions used by CI are Elixir 1.19.5, Erlang/OTP 28.3.1, and PostgreSQL 17. The default development database credentials are documented in the [contribution guide](CONTRIBUTING.md#development-environment).
+
+2. Install dependencies and prepare the database:
 
    ```bash
    mix setup
    ```
 
-2. Start the server:
+3. Start the server:
 
    ```bash
    mix phx.server
    ```
 
-3. Visit `http://localhost:4000`.
+4. Visit `http://localhost:4000`.
 
 For a production or container install, use the [Docker Compose quick install](docs/deployment.md#quick-docker-compose-install).
 
@@ -74,6 +76,11 @@ The project DSN key is printed to stdout when the seeds run.
 - [Production Runbook](docs/production.md)
 - [Backup and Recovery Playbook](docs/backup-recovery.md)
 - [Testing Guide](docs/testing.md)
+- [Contribution Guide](CONTRIBUTING.md)
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, testing, and pull request guidance.
 
 ## Common Commands
 
