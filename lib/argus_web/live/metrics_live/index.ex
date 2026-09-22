@@ -101,7 +101,7 @@ defmodule ArgusWeb.MetricsLive.Index do
             <div
               :if={@metric_count > 0}
               id="project-metrics-chart-frame"
-              class="h-[320px] min-w-0 overflow-hidden px-2 py-4 sm:h-[420px] sm:px-4 sm:py-5"
+              class="h-[380px] min-w-0 overflow-hidden px-2 pb-2 pt-4 sm:h-[460px] sm:px-4 sm:pb-4 sm:pt-5"
             >
               <LiveCharts.chart chart={@metric_chart} />
             </div>
@@ -404,16 +404,36 @@ defmodule ArgusWeb.MetricsLive.Index do
   defp chart_options(name, type, unit) do
     %{
       chart: %{
+        height: "100%",
+        width: "100%",
         toolbar: %{show: false},
         animations: %{enabled: true},
-        parentHeightOffset: 0
+        parentHeightOffset: 0,
+        redrawOnParentResize: true,
+        redrawOnWindowResize: true
       },
       stroke: %{curve: "smooth", width: 2},
       fill: %{opacity: if(type == :distribution, do: 0.18, else: 0.85)},
       colors: ["#0284c7", "#10b981", "#f59e0b"],
       dataLabels: %{enabled: false},
-      grid: %{borderColor: "#e4e4e7", strokeDashArray: 4},
-      xaxis: %{type: "datetime", labels: %{datetimeUTC: false}},
+      grid: %{
+        borderColor: "#e4e4e7",
+        strokeDashArray: 4,
+        padding: %{bottom: 6, left: 4, right: 4}
+      },
+      legend: %{position: "bottom", horizontalAlign: "center", fontSize: "12px"},
+      xaxis: %{
+        type: "datetime",
+        axisBorder: %{show: true, color: "#d4d4d8"},
+        axisTicks: %{show: true, color: "#d4d4d8"},
+        labels: %{
+          show: true,
+          datetimeUTC: false,
+          hideOverlappingLabels: true,
+          rotate: 0,
+          trim: true
+        }
+      },
       yaxis: %{title: %{text: yaxis_title(name, unit)}},
       tooltip: %{x: %{format: "yyyy-MM-dd HH:mm"}}
     }
