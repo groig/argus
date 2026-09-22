@@ -31,6 +31,21 @@ defmodule ArgusWeb.MetricsLive.IndexTest do
     assert has_element?(view, "#project-metrics-chart")
     assert has_element?(view, "#metric-points tr", "checkout.duration")
     assert has_element?(view, "#metric-points tr", "millisecond")
+
+    [chart_config] =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query_by_id("project-metrics-chart")
+      |> LazyHTML.attribute("data-chart")
+
+    decoded_config = Jason.decode!(chart_config)
+
+    assert decoded_config["chart"]["height"] == "100%"
+    assert decoded_config["chart"]["width"] == "100%"
+    assert decoded_config["chart"]["redrawOnParentResize"]
+    assert decoded_config["xaxis"]["labels"]["show"]
+    assert decoded_config["legend"]["position"] == "bottom"
   end
 
   test "filters metric points by name and type", %{conn: conn, project: project} do

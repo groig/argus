@@ -28,5 +28,12 @@ body {
 }
 
 #project-metrics-chart {
+  min-width: 0;
+  width: 100%;
   height: 100%;
+}
+
+#project-metrics-chart .apexcharts-canvas,
+#project-metrics-chart .apexcharts-svg {
+  max-width: 100%;
 }
