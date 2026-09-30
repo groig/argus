@@ -12,7 +12,7 @@ defmodule ArgusWeb.IngestController do
   end
 
   def store(conn, _params) do
-    with {:ok, payload} <- read_store_payload(conn),
+    with {:ok, payload, conn} <- read_store_payload(conn),
          {:ok, %{id: id}} <- Ingest.ingest_store(conn.assigns.project, payload) do
       conn
       |> put_cors_headers()
@@ -39,7 +39,7 @@ defmodule ArgusWeb.IngestController do
   end
 
   def envelope(conn, _params) do
-    with {:ok, body} <- read_raw_body(conn),
+    with {:ok, body, conn} <- read_raw_body(conn),
          {:ok, decoded_body} <- decode_request_body(conn, body),
          {:ok, result} <- Ingest.ingest_envelope(conn.assigns.project, decoded_body) do
       conn = put_cors_headers(conn)
@@ -69,21 +69,26 @@ defmodule ArgusWeb.IngestController do
     end
   end
 
-  defp read_raw_body(%Plug.Conn{assigns: %{raw_body: body}}), do: {:ok, body}
+  defp read_raw_body(%Plug.Conn{assigns: %{raw_body: body}} = conn), do: {:ok, body, conn}
 
-  defp read_raw_body(conn) do
+  # Read the whole body and keep the updated conn: returning a stale conn or
+  # stopping at {:more, ...} leaves unread bytes on the keep-alive connection,
+  # which Bandit then parses as the next request line.
+  defp read_raw_body(conn), do: read_raw_body(conn, [])
+
+  defp read_raw_body(conn, chunks) do
     case Plug.Conn.read_body(conn) do
-      {:ok, body, _conn} -> {:ok, body}
-      {:more, body, _conn} -> {:ok, body}
+      {:ok, body, conn} -> {:ok, IO.iodata_to_binary(Enum.reverse([body | chunks])), conn}
+      {:more, body, conn} -> read_raw_body(conn, [body | chunks])
       error -> error
     end
   end
 
   defp read_store_payload(%Plug.Conn{body_params: %Plug.Conn.Unfetched{}} = conn) do
-    with {:ok, body} <- read_raw_body(conn),
+    with {:ok, body, conn} <- read_raw_body(conn),
          {:ok, decoded_body} <- decode_request_body(conn, body),
          {:ok, payload} <- Jason.decode(decoded_body) do
-      {:ok, payload}
+      {:ok, payload, conn}
     end
   end
 
@@ -94,12 +99,12 @@ defmodule ArgusWeb.IngestController do
       |> List.first()
 
     if content_encoding in [nil, "", "identity"] do
-      {:ok, body_params}
+      {:ok, body_params, conn}
     else
-      with {:ok, body} <- read_raw_body(conn),
+      with {:ok, body, conn} <- read_raw_body(conn),
            {:ok, decoded_body} <- decode_request_body(conn, body),
            {:ok, payload} <- Jason.decode(decoded_body) do
-        {:ok, payload}
+        {:ok, payload, conn}
       end
     end
   end

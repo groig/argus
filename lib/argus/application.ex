@@ -14,6 +14,7 @@ defmodule Argus.Application do
       {Phoenix.PubSub, name: Argus.PubSub},
       {Task.Supervisor, name: Argus.TaskSupervisor},
       Argus.Logs.RateLimiter,
+      Argus.Retention,
       ArgusWeb.Endpoint
     ]
 

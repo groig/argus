@@ -308,7 +308,26 @@ defmodule Argus.Ingest do
     end
   end
 
+  # Fingerprints stay in an indexed varchar(255) column. Long ones (huge
+  # exception messages) are hashed; short ones are kept verbatim so existing
+  # issues keep grouping the same way.
+  @max_fingerprint_length 255
+
   defp fingerprint_for_payload(payload) do
+    payload
+    |> raw_fingerprint_for_payload()
+    |> bound_fingerprint()
+  end
+
+  defp bound_fingerprint(fingerprint) when is_binary(fingerprint) do
+    if String.length(fingerprint) <= @max_fingerprint_length do
+      fingerprint
+    else
+      "sha256:" <> Base.encode16(:crypto.hash(:sha256, fingerprint), case: :lower)
+    end
+  end
+
+  defp raw_fingerprint_for_payload(payload) do
     case exception_values(payload) do
       [%{} = exception | _] ->
         first_frame =

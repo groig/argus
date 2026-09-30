@@ -71,4 +71,17 @@ defmodule Argus.Ingest.ScrubberTest do
     assert Map.take(scrubbed, ["count", "active", "missing"]) ==
              Map.take(payload, ["count", "active", "missing"])
   end
+
+  test "scrubs very long strings in linear time" do
+    long_run = String.duplicate("a", 2_000_000)
+    {elapsed_us, scrubbed} = :timer.tc(fn -> Scrubber.scrub(%{"blob" => long_run}) end)
+
+    assert scrubbed == %{"blob" => long_run}
+    assert elapsed_us < 2_000_000
+
+    with_url = long_run <> " https://user:secret@example.com/?token=abc&page=2"
+
+    assert Scrubber.scrub(with_url) ==
+             long_run <> " https://user:[Filtered]@example.com/?token=[Filtered]&page=2"
+  end
 end

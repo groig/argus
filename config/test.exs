@@ -42,3 +42,6 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Retention runs on demand in tests, not on a timer.
+config :argus, Argus.Retention, enabled: false

@@ -61,7 +61,9 @@ defmodule Argus.Ingest.Scrubber do
     _cookie
   )
 
-  @url_userinfo_regex ~r{([a-z][a-z0-9+.-]*://[^:/\s@]+:)([^@\s/]+)(@)}i
+  # The scheme is bounded ({0,31}) so long runs of letters without "://" (base64
+  # blobs, minified source) cannot trigger quadratic backtracking.
+  @url_userinfo_regex ~r|([a-z][a-z0-9+.-]{0,31}://[^:/\s@]+:)([^@\s/]+)(@)|i
   @query_parameter_regex ~r{([?&])([^=&\s]+)=([^&#\s]*)}
 
   def scrub(value) when is_map(value) and not is_struct(value) do
@@ -104,10 +106,22 @@ defmodule Argus.Ingest.Scrubber do
   end
 
   defp scrub_url_userinfo(value) do
-    Regex.replace(@url_userinfo_regex, value, "\\1#{@filtered}\\3")
+    if String.contains?(value, "://") and String.contains?(value, "@") do
+      Regex.replace(@url_userinfo_regex, value, "\\1#{@filtered}\\3")
+    else
+      value
+    end
   end
 
   defp scrub_query_parameters(value) do
+    if String.contains?(value, "=") and String.contains?(value, ["?", "&"]) do
+      replace_sensitive_query_parameters(value)
+    else
+      value
+    end
+  end
+
+  defp replace_sensitive_query_parameters(value) do
     Regex.replace(
       @query_parameter_regex,
       value,

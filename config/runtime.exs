@@ -35,6 +35,12 @@ maybe_put_env = fn config, key, env_var ->
   end
 end
 
+config :argus, Argus.Retention,
+  occurrence_max_age_days:
+    String.to_integer(System.get_env("ARGUS_OCCURRENCE_RETENTION_DAYS", "90")),
+  max_occurrences_per_issue:
+    String.to_integer(System.get_env("ARGUS_MAX_OCCURRENCES_PER_ISSUE", "100"))
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

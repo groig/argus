@@ -537,6 +537,106 @@ defmodule ArgusWeb.IngestControllerTest do
 
       assert json_response(conn, 403)["detail"] == "Project not found or key incorrect"
     end
+
+    test "stores events whose title, culprit, url and fingerprint exceed 255 chars", %{
+      conn: conn,
+      project: project
+    } do
+      event_id = "40a2f0e6085d44ef7a7c8a67cc55c999"
+      long_message = String.duplicate("very long exception message ", 40)
+      long_url = "https://example.com/search?q=" <> String.duplicate("x", 400)
+
+      payload =
+        error_payload(event_id, %{
+          "exception" => %{
+            "values" => [%{"type" => "RuntimeError", "value" => long_message}]
+          },
+          "request" => %{"url" => long_url}
+        })
+
+      payload_json = Jason.encode!(payload)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/x-sentry-envelope")
+        |> post(
+          ~p"/api/#{project.id}/envelope/?sentry_key=#{project.dsn_key}",
+          build_envelope(
+            %{"event_id" => event_id},
+            [%{"type" => "event", "length" => byte_size(payload_json)}, payload_json]
+          )
+        )
+
+      assert %{"id" => ^event_id} = json_response(conn, 200)
+
+      issue =
+        Repo.one!(from error_event in ErrorEvent, where: error_event.project_id == ^project.id)
+
+      assert issue.title == "RuntimeError: " <> long_message
+      assert issue.culprit == long_url
+      assert "sha256:" <> hash = issue.fingerprint
+      assert String.length(hash) == 64
+
+      occurrence = Repo.one!(from o in ErrorOccurrence, where: o.error_event_id == ^issue.id)
+      assert occurrence.request_url == long_url
+    end
+
+    test "groups repeated long-fingerprint events into one issue", %{
+      conn: conn,
+      project: project
+    } do
+      long_message = String.duplicate("repeated long message ", 30)
+
+      for event_id <- ["50a2f0e6085d44ef7a7c8a67cc55c991", "50a2f0e6085d44ef7a7c8a67cc55c992"] do
+        payload_json =
+          event_id
+          |> error_payload(%{
+            "exception" => %{"values" => [%{"type" => "RuntimeError", "value" => long_message}]}
+          })
+          |> Jason.encode!()
+
+        conn
+        |> put_req_header("content-type", "application/x-sentry-envelope")
+        |> post(
+          ~p"/api/#{project.id}/envelope/?sentry_key=#{project.dsn_key}",
+          build_envelope(
+            %{"event_id" => event_id},
+            [%{"type" => "event", "length" => byte_size(payload_json)}, payload_json]
+          )
+        )
+        |> json_response(200)
+      end
+
+      assert [%ErrorEvent{occurrence_count: 2}] =
+               Repo.all(
+                 from error_event in ErrorEvent, where: error_event.project_id == ^project.id
+               )
+    end
+
+    test "reads envelopes larger than a single read_body chunk", %{
+      conn: conn,
+      project: project
+    } do
+      event_id = "60a2f0e6085d44ef7a7c8a67cc55c999"
+      # Plug.Conn.read_body returns {:more, ...} past 8_000_000 bytes by default.
+      padding = String.duplicate("a", 8_500_000)
+
+      payload_json =
+        event_id |> error_payload(%{"extra" => %{"blob" => padding}}) |> Jason.encode!()
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/x-sentry-envelope")
+        |> post(
+          ~p"/api/#{project.id}/envelope/?sentry_key=#{project.dsn_key}",
+          build_envelope(
+            %{"event_id" => event_id},
+            [%{"type" => "event", "length" => byte_size(payload_json)}, payload_json]
+          )
+        )
+
+      assert %{"id" => ^event_id} = json_response(conn, 200)
+    end
   end
 
   defp error_payload(event_id, overrides \\ %{}) do
