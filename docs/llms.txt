@@ -1,0 +1,87 @@
+# Argus agent API
+
+> Argus is a self-hosted, Sentry-compatible error tracker. Its agent API is a read-only HTTP API that returns Markdown, so you can list a project's issues, read full stacktraces, and look through every stored occurrence of an issue. You can't change anything through it.
+
+## Setup
+
+You need two values from the user:
+
+- `ARGUS_URL`: the Argus base URL, e.g. `https://argus.example.com` (no trailing slash)
+- `ARGUS_TOKEN`: a personal API token. Users create one in Argus under Settings → API tokens. It starts with `argus_`.
+
+Send the token on every request:
+
+```sh
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects"
+```
+
+The token has the same access as the user who created it: admins see every project, other users see the projects of their teams. Treat the token as a secret and never print it or write it to files.
+
+## Endpoints
+
+All endpoints are `GET` and all responses are `text/markdown`. Every URL in a response is absolute, so you can request it as-is.
+
+- `/api/v1`: lists these endpoints and their parameters.
+- `/api/v1/projects`: projects you can access, as a table with name, slug, team, unresolved count, and an issues URL. You need the slug for everything else.
+- `/api/v1/projects/{slug}/issues`: issues in a project, most recently seen first, as a table with ID, title, level, status, event count, last seen, culprit, and a details URL.
+  - `status`: `unresolved` (default), `resolved`, `ignored`, `all`
+  - `level`: `error`, `warning`, `info`, `all` (default)
+  - `q`: case-insensitive search in issue titles
+  - `page` (default 1), `per_page` (default 25, max 100)
+  - `full=true`: instead of the table, returns each issue's full text (see the next endpoint), separated by `---`. `per_page` defaults to 10 here (max 25).
+- `/api/v1/projects/{slug}/issues/{id}`: the full text of one issue, using its latest occurrence: summary, event metadata, exceptions with stack frames (source context and local variables), user, request, SDK, tags, contexts, extra, and query breadcrumbs. Ends with a link to the issue's occurrences.
+  - `frames`: `in_app` (default, only the application's own frames) or `all` (adds library and framework frames)
+- `/api/v1/projects/{slug}/issues/{id}/occurrences`: every stored occurrence of the issue, newest first, as a table with ID, timestamp, event ID, request URL, exception, and a details URL.
+  - `page` (default 1), `per_page` (default 20, max 100)
+  - `full=true`: returns the full text of each occurrence instead. `per_page` defaults to 5 here (max 20).
+  - `frames`: `in_app` (default) or `all`
+- `/api/v1/projects/{slug}/issues/{id}/occurrences/{occurrence_id}`: the full text of one occurrence. Takes `frames` the same way.
+
+## Pagination
+
+List responses end with a line such as `Page 1 of 4 (87 issues)`. When there are more pages, `Next: <url>` and `Previous: <url>` lines follow. Follow `Next:` until it no longer appears. These URLs keep your filters.
+
+## Errors
+
+- `401`: the token is missing, wrong, or revoked. Ask the user for a valid token.
+- `404`: the project, issue, or occurrence doesn't exist or you don't have access to it. Check the slug with `/api/v1/projects`.
+
+## Typical workflows
+
+Triage a project:
+
+```sh
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects"
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues?status=unresolved&level=error"
+```
+
+Debug one issue:
+
+```sh
+# Latest occurrence with in-app stack frames, source context, and locals
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783"
+# The same, with library and framework frames
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783?frames=all"
+```
+
+Check whether an issue happens with different inputs, users, or URLs:
+
+```sh
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783/occurrences"
+curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783/occurrences?full=true&per_page=3"
+```
+
+Find issues by title:
+
+```sh
+curl -sS -G -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues" \
+  --data-urlencode "q=timeout" --data-urlencode "status=all"
+```
+
+## Tips
+
+- Start with the tables and fetch full text only for the issues you're working on. Full text can be long: one occurrence may include many frames with local variables.
+- Use the default `frames=in_app` first. Ask for `frames=all` only when the cause seems to be in a library or framework.
+- `Culprit` and the in-app frames usually point at the file and function to open in the codebase. Line numbers are in each frame header, e.g. `Frame 1: billing.views / checkout / line 42`, and the failing line in a frame's source context is marked with `=>`.
+- An issue's `Events` count can be higher than the number of stored occurrences, because old occurrences are deleted by retention.
+- Sensitive values are scrubbed when events arrive, so redacted fields are expected.

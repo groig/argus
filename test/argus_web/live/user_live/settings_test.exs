@@ -90,4 +90,42 @@ defmodule ArgusWeb.UserLive.SettingsTest do
       assert html =~ "does not match password"
     end
   end
+
+  describe "API tokens" do
+    setup %{conn: conn} do
+      user = user_fixture()
+      %{conn: log_in_user(conn, user), user: user}
+    end
+
+    test "creates a token, shows it once, and revokes it", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/settings")
+
+      refute has_element?(lv, "#new-api-token")
+
+      lv
+      |> form("#api-token-form", api_token: %{name: "Claude Code"})
+      |> render_submit()
+
+      assert has_element?(lv, "#new-api-token")
+      assert [api_token] = Accounts.list_api_tokens(user)
+      assert has_element?(lv, "#api_tokens-#{api_token.id}")
+
+      lv |> element("#revoke-api_tokens-#{api_token.id}") |> render_click()
+
+      refute has_element?(lv, "#api_tokens-#{api_token.id}")
+      refute has_element?(lv, "#new-api-token")
+      assert Accounts.list_api_tokens(user) == []
+    end
+
+    test "requires a name", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/settings")
+
+      lv
+      |> form("#api-token-form", api_token: %{name: "  "})
+      |> render_submit()
+
+      refute has_element?(lv, "#new-api-token")
+      assert Accounts.list_api_tokens(user) == []
+    end
+  end
 end

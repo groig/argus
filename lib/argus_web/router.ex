@@ -17,6 +17,10 @@ defmodule ArgusWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :agent_api do
+    plug ArgusWeb.Plugs.ApiAuth
+  end
+
   scope "/", ArgusWeb do
     pipe_through :browser
 
@@ -60,6 +64,18 @@ defmodule ArgusWeb.Router do
     options "/:project_id/envelope/", IngestController, :options
     post "/:project_id/store/", IngestController, :store
     post "/:project_id/envelope/", IngestController, :envelope
+  end
+
+  # Read-only Markdown API for agents, authenticated with personal API tokens.
+  scope "/api/v1", ArgusWeb do
+    pipe_through :agent_api
+
+    get "/", AgentController, :index
+    get "/projects", AgentController, :projects
+    get "/projects/:slug/issues", AgentController, :issues
+    get "/projects/:slug/issues/:id", AgentController, :issue
+    get "/projects/:slug/issues/:id/occurrences", AgentController, :occurrences
+    get "/projects/:slug/issues/:id/occurrences/:occurrence_id", AgentController, :occurrence
   end
 
   if Application.compile_env(:argus, :dev_routes) do

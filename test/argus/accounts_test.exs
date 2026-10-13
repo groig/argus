@@ -227,4 +227,28 @@ defmodule Argus.AccountsTest do
       assert Repo.aggregate(from(inv in Invitation, where: inv.user_id == ^user.id), :count) == 0
     end
   end
+
+  describe "API tokens" do
+    test "verifies tokens by their raw value and scopes deletion to the owner" do
+      user = user_fixture()
+      other = user_fixture()
+
+      assert {:ok, {raw, api_token}} = Accounts.create_api_token(user, %{"name" => "agent"})
+      assert "argus_" <> _ = raw
+      refute api_token.token_hash == raw
+
+      assert Accounts.get_user_by_api_token(raw).id == user.id
+      assert Accounts.get_user_by_api_token("argus_wrong") == nil
+      assert [%{last_used_at: %DateTime{}}] = Accounts.list_api_tokens(user)
+
+      assert {:error, :not_found} = Accounts.delete_api_token(other, api_token.id)
+      assert :ok = Accounts.delete_api_token(user, api_token.id)
+      assert Accounts.get_user_by_api_token(raw) == nil
+    end
+
+    test "requires a name" do
+      assert {:error, changeset} = Accounts.create_api_token(user_fixture(), %{"name" => " "})
+      assert %{name: ["can't be blank"]} = errors_on(changeset)
+    end
+  end
 end

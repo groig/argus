@@ -10,7 +10,7 @@ defmodule Argus.Accounts do
   import Ecto.Query, warn: false
 
   alias Ecto.Multi
-  alias Argus.Accounts.{Invitation, User, UserNotifier, UserToken}
+  alias Argus.Accounts.{ApiToken, Invitation, User, UserNotifier, UserToken}
   alias Argus.Repo
 
   def list_users do
@@ -111,6 +111,67 @@ defmodule Argus.Accounts do
         where: user_token.token == ^token and user_token.context == "session"
       )
     )
+
+    :ok
+  end
+
+  ## API tokens
+
+  def list_api_tokens(%User{id: user_id}) do
+    Repo.all(
+      from api_token in ApiToken,
+        where: api_token.user_id == ^user_id,
+        order_by: [desc: api_token.inserted_at, desc: api_token.id]
+    )
+  end
+
+  def change_api_token(attrs \\ %{}) do
+    ApiToken.changeset(%ApiToken{}, attrs)
+  end
+
+  @doc """
+  Creates a token for the user. Returns `{:ok, {raw_token, api_token}}`; the raw token can't be
+  recovered later.
+  """
+  def create_api_token(%User{} = user, attrs) do
+    {raw, changeset} = ApiToken.build(user, attrs)
+
+    with {:ok, api_token} <- Repo.insert(changeset) do
+      {:ok, {raw, api_token}}
+    end
+  end
+
+  def delete_api_token(%User{id: user_id}, id) do
+    {count, _} =
+      Repo.delete_all(
+        from api_token in ApiToken, where: api_token.id == ^id and api_token.user_id == ^user_id
+      )
+
+    if count == 1, do: :ok, else: {:error, :not_found}
+  end
+
+  @doc """
+  Returns the user owning the raw token, or nil. Touches `last_used_at` at most once a minute.
+  """
+  def get_user_by_api_token(raw) when is_binary(raw) do
+    case Repo.one(ApiToken.verify_query(raw)) do
+      {api_token, user} ->
+        touch_api_token(api_token)
+        user
+
+      nil ->
+        nil
+    end
+  end
+
+  def get_user_by_api_token(_raw), do: nil
+
+  defp touch_api_token(%ApiToken{last_used_at: last_used_at} = api_token) do
+    now = DateTime.utc_now(:second)
+
+    if is_nil(last_used_at) or DateTime.diff(now, last_used_at) >= 60 do
+      Repo.update_all(from(t in ApiToken, where: t.id == ^api_token.id), set: [last_used_at: now])
+    end
 
     :ok
   end

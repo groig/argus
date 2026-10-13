@@ -274,7 +274,43 @@ defmodule Argus.Projects do
     "#{uri.scheme}://#{project.dsn_key}@#{host}#{port}#{path}/#{project.id}"
   end
 
-  def list_error_events(%Project{id: project_id}, filters \\ %{}) do
+  def list_error_events(%Project{} = project, filters \\ %{}) do
+    project
+    |> filtered_error_events_query(filters)
+    |> order_by([error_event], desc: error_event.last_seen_at, desc: error_event.id)
+    |> preload([:assignee])
+    |> Repo.all()
+  end
+
+  @doc """
+  Pages through a project's issues with the same filters as `list_error_events/2`.
+  """
+  def paginate_error_events(%Project{} = project, filters, page, per_page)
+      when is_integer(page) and page > 0 and is_integer(per_page) and per_page > 0 do
+    query = filtered_error_events_query(project, filters)
+
+    total_count = Repo.aggregate(query, :count, :id)
+    total_pages = max(div(total_count + per_page - 1, per_page), 1)
+    page = min(page, total_pages)
+
+    entries =
+      query
+      |> order_by([error_event], desc: error_event.last_seen_at, desc: error_event.id)
+      |> limit(^per_page)
+      |> offset(^((page - 1) * per_page))
+      |> preload([:assignee])
+      |> Repo.all()
+
+    %{
+      entries: entries,
+      page: page,
+      per_page: per_page,
+      total_count: total_count,
+      total_pages: total_pages
+    }
+  end
+
+  defp filtered_error_events_query(%Project{id: project_id}, filters) do
     search = Map.get(filters, "search", "") |> String.trim()
     level = normalize_level(Map.get(filters, "level"))
     status = normalize_status(Map.get(filters, "status"))
@@ -283,9 +319,6 @@ defmodule Argus.Projects do
     |> maybe_filter_level(level)
     |> maybe_filter_status(status)
     |> maybe_search(search)
-    |> order_by([error_event], desc: error_event.last_seen_at, desc: error_event.id)
-    |> preload([:assignee])
-    |> Repo.all()
   end
 
   def get_error_event(%Project{id: project_id}, id) do

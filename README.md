@@ -67,6 +67,7 @@ The project DSN key is printed to stdout when the seeds run.
 - Sentry metrics ingestion with charts and raw metric point inspection
 - users, teams, projects, invitations, and issue assignment
 - email notifications and optional webhooks for issue lifecycle and manual action events
+- read-only Markdown API for coding agents, with personal API tokens
 
 ## Documentation
 
@@ -76,6 +77,7 @@ The project DSN key is printed to stdout when the seeds run.
 - [Production Runbook](docs/production.md)
 - [Backup and Recovery Playbook](docs/backup-recovery.md)
 - [Testing Guide](docs/testing.md)
+- [Agent API (llms.txt)](docs/llms.txt) - point your coding agent at this file to read issues from Argus
 - [Contribution Guide](CONTRIBUTING.md)
 
 ## Contributing

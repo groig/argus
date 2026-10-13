@@ -11,7 +11,7 @@ defmodule ArgusWeb.UserLive.Settings do
     <Layouts.app flash={@flash} current_scope={@current_scope} sidebar={@sidebar}>
       <.header>
         Your settings
-        <:subtitle>Update your profile details and rotate your password.</:subtitle>
+        <:subtitle>Update your profile, rotate your password, and manage API tokens.</:subtitle>
       </.header>
 
       <div class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -70,6 +70,92 @@ defmodule ArgusWeb.UserLive.Settings do
           </.form>
         </section>
       </div>
+
+      <section id="api-tokens" class="mt-6 border border-zinc-200 bg-white p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-semibold text-zinc-950">API tokens</h2>
+            <p class="mt-1 max-w-2xl text-sm leading-6 text-zinc-600">
+              Read-only access for agents and scripts to the projects you can see.
+              Requests return Markdown; start at <code class="font-mono text-xs text-zinc-800">{url(~p"/api/v1")}</code>.
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@new_api_token}
+          id="new-api-token"
+          class="mt-6 border border-emerald-200 bg-emerald-50/60 p-4"
+        >
+          <p class="text-sm font-medium text-emerald-900">
+            Copy your new token now. It won't be shown again.
+          </p>
+          <.copy_to_clipboard
+            id="copy-new-api-token"
+            value={@new_api_token}
+            toast_message="Token copied"
+            class="mt-3 bg-white"
+          />
+          <p class="mt-3 text-xs text-emerald-900/80">
+            Use it as <code class="font-mono">Authorization: Bearer &lt;token&gt;</code>
+          </p>
+        </div>
+
+        <.form
+          for={@api_token_form}
+          id="api-token-form"
+          phx-submit="create-api-token"
+          class="mt-6 flex flex-wrap items-end gap-3"
+        >
+          <div class="min-w-64 flex-1">
+            <.input
+              field={@api_token_form[:name]}
+              type="text"
+              label="Token name"
+              placeholder="e.g. Claude Code on laptop"
+              required
+            />
+          </div>
+          <.button id="create-api-token-button" variant="secondary" class="mb-2">
+            <.icon name="hero-key-mini" class="size-4" /> Create token
+          </.button>
+        </.form>
+
+        <div
+          id="api-token-list"
+          phx-update="stream"
+          class="mt-6 divide-y divide-zinc-100 border-t border-zinc-100"
+        >
+          <p id="api-tokens-empty" class="hidden py-4 text-sm text-zinc-500 only:block">
+            No API tokens yet.
+          </p>
+          <div
+            :for={{dom_id, api_token} <- @streams.api_tokens}
+            id={dom_id}
+            class="group flex items-center justify-between gap-4 py-3 transition-colors hover:bg-slate-50/60"
+          >
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium text-zinc-900">{api_token.name}</p>
+              <p class="mt-0.5 text-xs text-zinc-500">
+                Created {Calendar.strftime(api_token.inserted_at, "%b %-d, %Y")} · {last_used_label(
+                  api_token.last_used_at
+                )}
+              </p>
+            </div>
+            <.button
+              id={"revoke-#{dom_id}"}
+              type="button"
+              variant="ghost"
+              size="sm"
+              phx-click="revoke-api-token"
+              phx-value-id={api_token.id}
+              data-confirm={"Revoke \"#{api_token.name}\"? Agents using it will lose access."}
+            >
+              Revoke
+            </.button>
+          </div>
+        </div>
+      </section>
     </Layouts.app>
     """
   end
@@ -89,7 +175,10 @@ defmodule ArgusWeb.UserLive.Settings do
        :password_form,
        to_form(Accounts.change_user_password(user, %{}, hash_password: false), as: :user)
      )
-     |> assign(:trigger_submit, false)}
+     |> assign(:trigger_submit, false)
+     |> assign(:new_api_token, nil)
+     |> assign(:api_token_form, to_form(Accounts.change_api_token(), as: :api_token))
+     |> stream(:api_tokens, Accounts.list_api_tokens(user))}
   end
 
   @impl true
@@ -131,6 +220,35 @@ defmodule ArgusWeb.UserLive.Settings do
     {:noreply, assign(socket, :password_form, form)}
   end
 
+  def handle_event("create-api-token", %{"api_token" => params}, socket) do
+    case Accounts.create_api_token(socket.assigns.current_scope.user, params) do
+      {:ok, {raw, api_token}} ->
+        {:noreply,
+         socket
+         |> assign(:new_api_token, raw)
+         |> assign(:api_token_form, to_form(Accounts.change_api_token(), as: :api_token))
+         |> stream_insert(:api_tokens, api_token, at: 0)}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :api_token_form, to_form(changeset, as: :api_token))}
+    end
+  end
+
+  def handle_event("revoke-api-token", %{"id" => id}, socket) do
+    user = socket.assigns.current_scope.user
+
+    with {id, ""} <- Integer.parse(id),
+         :ok <- Accounts.delete_api_token(user, id) do
+      {:noreply,
+       socket
+       |> assign(:new_api_token, nil)
+       |> stream_delete_by_dom_id(:api_tokens, "api_tokens-#{id}")
+       |> put_flash(:info, "Token revoked.")}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Token not found.")}
+    end
+  end
+
   def handle_event("save-password", %{"user" => params}, socket) do
     changeset = Accounts.change_user_password(socket.assigns.current_scope.user, params)
 
@@ -140,4 +258,9 @@ defmodule ArgusWeb.UserLive.Settings do
       {:noreply, assign(socket, :password_form, to_form(changeset, as: :user))}
     end
   end
+
+  defp last_used_label(nil), do: "Never used"
+
+  defp last_used_label(last_used_at),
+    do: "Last used " <> Calendar.strftime(last_used_at, "%b %-d, %Y %H:%M UTC")
 end
