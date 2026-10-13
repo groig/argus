@@ -1,6 +1,6 @@
 # Argus agent API
 
-> Argus is a self-hosted, Sentry-compatible error tracker. Its agent API is a read-only HTTP API that returns Markdown, so you can list a project's issues, read full stacktraces, and look through every stored occurrence of an issue. You can't change anything through it.
+> Argus is a self-hosted, Sentry-compatible error tracker. Its agent API is an HTTP API that returns Markdown, so you can list a project's issues, read full stacktraces, look through every stored occurrence of an issue, and resolve an issue once it's fixed. Resolving is the only change you can make through it.
 
 ## Setup
 
@@ -19,7 +19,7 @@ The token has the same access as the user who created it: admins see every proje
 
 ## Endpoints
 
-All endpoints are `GET` and all responses are `text/markdown`. Every URL in a response is absolute, so you can request it as-is.
+All endpoints are `GET` except resolving, which is `POST`. All responses are `text/markdown`. Every URL in a response is absolute, so you can request it as-is.
 
 - `/api/v1`: lists these endpoints and their parameters.
 - `/api/v1/projects`: projects you can access, as a table with name, slug, team, unresolved count, and an issues URL. You need the slug for everything else.
@@ -31,6 +31,7 @@ All endpoints are `GET` and all responses are `text/markdown`. Every URL in a re
   - `full=true`: instead of the table, returns each issue's full text (see the next endpoint), separated by `---`. `per_page` defaults to 10 here (max 25).
 - `/api/v1/projects/{slug}/issues/{id}`: the full text of one issue, using its latest occurrence: summary, event metadata, exceptions with stack frames (source context and local variables), user, request, SDK, tags, contexts, extra, and query breadcrumbs. Ends with a link to the issue's occurrences.
   - `frames`: `in_app` (default, only the application's own frames) or `all` (adds library and framework frames)
+- `POST /api/v1/projects/{slug}/issues/{id}/resolve`: marks the issue as resolved. Takes no body. Resolving an already resolved issue succeeds and changes nothing. A resolved issue reopens automatically when a new event arrives, so resolve only after the fix is deployed.
 - `/api/v1/projects/{slug}/issues/{id}/occurrences`: every stored occurrence of the issue, newest first, as a table with ID, timestamp, event ID, request URL, exception, and a details URL.
   - `page` (default 1), `per_page` (default 20, max 100)
   - `full=true`: returns the full text of each occurrence instead. `per_page` defaults to 5 here (max 20).
@@ -69,6 +70,12 @@ Check whether an issue happens with different inputs, users, or URLs:
 ```sh
 curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783/occurrences"
 curl -sS -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783/occurrences?full=true&per_page=3"
+```
+
+Resolve an issue after its fix is deployed:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $ARGUS_TOKEN" "$ARGUS_URL/api/v1/projects/billing-api/issues/1783/resolve"
 ```
 
 Find issues by title:

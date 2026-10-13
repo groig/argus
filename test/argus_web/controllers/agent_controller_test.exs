@@ -185,6 +185,60 @@ defmodule ArgusWeb.AgentControllerTest do
     end
   end
 
+  describe "resolve" do
+    test "resolves an issue", %{conn: conn, project: project} do
+      issue = issue_fixture(project)
+
+      body =
+        conn
+        |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/resolve")
+        |> response(200)
+
+      assert body =~ "is now resolved"
+      assert Argus.Repo.reload!(issue).status == :resolved
+    end
+
+    test "succeeds for an already resolved issue", %{conn: conn, project: project} do
+      issue = issue_fixture(project, %{status: :resolved})
+
+      body =
+        conn
+        |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/resolve")
+        |> response(200)
+
+      assert body =~ "was already resolved"
+    end
+
+    test "returns 404 for unknown issues and inaccessible projects", %{
+      conn: conn,
+      project: project
+    } do
+      other_issue = issue_fixture(project_fixture(team_fixture()))
+
+      assert conn
+             |> post(~p"/api/v1/projects/#{project.slug}/issues/999999/resolve")
+             |> response(404)
+
+      assert conn
+             |> post(
+               ~p"/api/v1/projects/#{other_issue.project.slug}/issues/#{other_issue.id}/resolve"
+             )
+             |> response(404)
+
+      assert Argus.Repo.reload!(other_issue).status == :unresolved
+    end
+
+    test "requires a token", %{project: project} do
+      issue = issue_fixture(project)
+
+      assert build_conn()
+             |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/resolve")
+             |> response(401)
+
+      assert Argus.Repo.reload!(issue).status == :unresolved
+    end
+  end
+
   test "admins can read any project" do
     admin = admin_fixture()
     project = project_fixture(team_fixture())

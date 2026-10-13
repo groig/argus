@@ -76,7 +76,7 @@ defmodule ArgusWeb.UserLive.Settings do
           <div>
             <h2 class="text-lg font-semibold text-zinc-950">API tokens</h2>
             <p class="mt-1 max-w-2xl text-sm leading-6 text-zinc-600">
-              Read-only access for agents and scripts to the projects you can see.
+              Access for agents and scripts to the projects you can see. Tokens can read issues and resolve them.
               Requests return Markdown; start at <code class="font-mono text-xs text-zinc-800">{url(~p"/api/v1")}</code>.
             </p>
           </div>

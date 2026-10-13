@@ -67,7 +67,7 @@ The project DSN key is printed to stdout when the seeds run.
 - Sentry metrics ingestion with charts and raw metric point inspection
 - users, teams, projects, invitations, and issue assignment
 - email notifications and optional webhooks for issue lifecycle and manual action events
-- read-only Markdown API for coding agents, with personal API tokens
+- Markdown API for coding agents, with personal API tokens: read issues and resolve them
 
 ## Documentation
 

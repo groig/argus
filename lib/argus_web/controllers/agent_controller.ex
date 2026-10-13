@@ -1,9 +1,10 @@
 defmodule ArgusWeb.AgentController do
   @moduledoc """
-  Read-only Markdown API meant for agents.
+  Markdown API meant for agents.
 
   Every response is `text/markdown` and links to the next useful request, so an agent can start at
-  `/api/v1` and navigate from there. Access matches the token owner's access in the web UI.
+  `/api/v1` and navigate from there. Access matches the token owner's access in the web UI. The
+  only write is resolving an issue.
   """
 
   use ArgusWeb, :controller
@@ -18,7 +19,7 @@ defmodule ArgusWeb.AgentController do
     markdown(conn, """
     # Argus agent API
 
-    Read-only. Every response is Markdown. Authenticate with `Authorization: Bearer <token>`.
+    Every response is Markdown. Authenticate with `Authorization: Bearer <token>`. Everything is read-only except resolving an issue.
 
     ## Endpoints
 
@@ -31,6 +32,7 @@ defmodule ArgusWeb.AgentController do
       - `full=true`: include each issue's full text (latest occurrence); `per_page` defaults to #{@issue_page.full_default}, max #{@issue_page.full_max}
     - `GET #{url(~p"/api/v1/projects/:slug/issues/:id")}` — full issue text with the latest occurrence, same as the "Copy issue" button
       - `frames`: `in_app` (default) or `all`
+    - `POST #{url(~p"/api/v1/projects/:slug/issues/:id/resolve")}` — mark an issue as resolved; it reopens if it happens again
     - `GET #{url(~p"/api/v1/projects/:slug/issues/:id/occurrences")}` — occurrences of an issue, newest first
       - `page`, `per_page` (default #{@occurrence_page.default}, max #{@occurrence_page.max})
       - `full=true`: include each occurrence's full text; `per_page` defaults to #{@occurrence_page.full_default}, max #{@occurrence_page.full_max}
@@ -123,6 +125,29 @@ defmodule ArgusWeb.AgentController do
     else
       {:error, conn} -> conn
       :issue_not_found -> not_found(conn, "Issue not found.")
+    end
+  end
+
+  def resolve(conn, %{"slug" => slug, "id" => id}) do
+    with {:ok, project} <- fetch_project(conn, slug),
+         {:ok, issue} <- fetch_issue(project, id),
+         {:ok, resolved} <-
+           Projects.update_error_event_status(conn.assigns.current_scope.user, issue, :resolved) do
+      message =
+        if issue.status == :resolved,
+          do: "Issue #{issue.id} was already resolved.",
+          else: "Issue #{issue.id} is now resolved."
+
+      markdown(conn, [
+        "# Issue resolved",
+        "#{message} It reopens automatically if a new event arrives.",
+        "Title: #{resolved.title}",
+        "Issue: #{url(~p"/api/v1/projects/#{project.slug}/issues/#{resolved.id}")}"
+      ])
+    else
+      {:error, %Plug.Conn{} = conn} -> conn
+      :issue_not_found -> not_found(conn, "Issue not found.")
+      {:error, _changeset} -> unprocessable(conn, "The issue could not be resolved.")
     end
   end
 
@@ -272,6 +297,12 @@ defmodule ArgusWeb.AgentController do
     conn
     |> put_resp_content_type("text/markdown")
     |> send_resp(:not_found, "# Not found\n\n#{message}\n")
+  end
+
+  defp unprocessable(conn, message) do
+    conn
+    |> put_resp_content_type("text/markdown")
+    |> send_resp(:unprocessable_entity, "# Not updated\n\n#{message}\n")
   end
 
   # Keeps table rows intact when values contain pipes or newlines.

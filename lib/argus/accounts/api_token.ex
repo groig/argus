@@ -1,6 +1,6 @@
 defmodule Argus.Accounts.ApiToken do
   @moduledoc """
-  Personal read-only token for the agent API.
+  Personal token for the agent API.
 
   Only the SHA-256 hash is stored. The raw token is shown once, at creation time, and grants the
   same project access as its owner.

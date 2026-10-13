@@ -66,7 +66,7 @@ defmodule ArgusWeb.Router do
     post "/:project_id/envelope/", IngestController, :envelope
   end
 
-  # Read-only Markdown API for agents, authenticated with personal API tokens.
+  # Markdown API for agents, authenticated with personal API tokens.
   scope "/api/v1", ArgusWeb do
     pipe_through :agent_api
 
@@ -74,6 +74,7 @@ defmodule ArgusWeb.Router do
     get "/projects", AgentController, :projects
     get "/projects/:slug/issues", AgentController, :issues
     get "/projects/:slug/issues/:id", AgentController, :issue
+    post "/projects/:slug/issues/:id/resolve", AgentController, :resolve
     get "/projects/:slug/issues/:id/occurrences", AgentController, :occurrences
     get "/projects/:slug/issues/:id/occurrences/:occurrence_id", AgentController, :occurrence
   end
