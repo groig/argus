@@ -574,7 +574,7 @@ defmodule ArgusWeb.IngestControllerTest do
 
       assert issue.title == "RuntimeError: " <> long_message
       assert issue.culprit == long_url
-      assert "sha256:" <> hash = issue.fingerprint
+      assert "v2:" <> hash = issue.fingerprint
       assert String.length(hash) == 64
 
       occurrence = Repo.one!(from o in ErrorOccurrence, where: o.error_event_id == ^issue.id)
@@ -613,6 +613,167 @@ defmodule ArgusWeb.IngestControllerTest do
                )
     end
 
+    test "groups exceptions with the same frames despite variable messages", %{
+      conn: conn,
+      project: project
+    } do
+      deadlock = fn pid, tx ->
+        "deadlock detected\nDETAIL:  Process #{pid} waits for ShareLock on transaction #{tx}; " <>
+          "blocked by process #{pid + 2}.\nCONTEXT:  while updating tuple (#{rem(pid, 50)},2)"
+      end
+
+      frames = [
+        %{"module" => "chancy.worker", "function" => "_maintain_updates", "lineno" => 503},
+        %{"module" => "psycopg.cursor_async", "function" => "executemany", "lineno" => 148}
+      ]
+
+      for {event_id, pid, tx, lineno} <- [
+            {"70a2f0e6085d44ef7a7c8a67cc55c991", 9477, 43_307_338, 148},
+            {"70a2f0e6085d44ef7a7c8a67cc55c992", 64_005, 43_232_893, 150}
+          ] do
+        frames = List.update_at(frames, 1, &Map.put(&1, "lineno", lineno))
+
+        post_event(conn, project, event_id, %{
+          "exception" => %{
+            "values" => [
+              %{
+                "type" => "DeadlockDetected",
+                "value" => deadlock.(pid, tx),
+                "stacktrace" => %{"frames" => frames}
+              }
+            ]
+          }
+        })
+      end
+
+      assert [%ErrorEvent{occurrence_count: 2}] = project_issues(project)
+    end
+
+    test "keeps exceptions raised from different frames apart", %{conn: conn, project: project} do
+      for {event_id, function} <- [
+            {"71a2f0e6085d44ef7a7c8a67cc55c991", "perform"},
+            {"71a2f0e6085d44ef7a7c8a67cc55c992", "enqueue"}
+          ] do
+        post_event(conn, project, event_id, %{
+          "exception" => %{
+            "values" => [
+              %{
+                "type" => "RuntimeError",
+                "value" => "boom",
+                "stacktrace" => %{
+                  "frames" => [%{"filename" => "job.ex", "function" => function}]
+                }
+              }
+            ]
+          }
+        })
+      end
+
+      assert [%ErrorEvent{occurrence_count: 1}, %ErrorEvent{occurrence_count: 1}] =
+               project_issues(project)
+    end
+
+    test "groups only by in-app frames when the SDK marks them", %{
+      conn: conn,
+      project: project
+    } do
+      for {event_id, library_function} <- [
+            {"72a2f0e6085d44ef7a7c8a67cc55c991", "call"},
+            {"72a2f0e6085d44ef7a7c8a67cc55c992", "call_with_retry"}
+          ] do
+        post_event(conn, project, event_id, %{
+          "exception" => %{
+            "values" => [
+              %{
+                "type" => "RuntimeError",
+                "value" => "boom",
+                "stacktrace" => %{
+                  "frames" => [
+                    %{"module" => "app.jobs", "function" => "perform", "in_app" => true},
+                    %{"module" => "lib.http", "function" => library_function, "in_app" => false}
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      end
+
+      assert [%ErrorEvent{occurrence_count: 2}] = project_issues(project)
+    end
+
+    test "groups messages and frameless exceptions with variable ids", %{
+      conn: conn,
+      project: project
+    } do
+      post_event(conn, project, "73a2f0e6085d44ef7a7c8a67cc55c991", %{
+        "exception" => nil,
+        "message" =>
+          "Order 1234 failed for 6f1c2a3e-1b2c-4d5e-8f90-1234567890ab at 0x7faae5d5d550"
+      })
+
+      post_event(conn, project, "73a2f0e6085d44ef7a7c8a67cc55c992", %{
+        "exception" => nil,
+        "message" => "Order 98 failed for 0a1b2c3d-4e5f-4a6b-9c8d-0123456789ef at 0x7fab40df7950"
+      })
+
+      for {event_id, id} <- [
+            {"73a2f0e6085d44ef7a7c8a67cc55c993", 1},
+            {"73a2f0e6085d44ef7a7c8a67cc55c994", 22}
+          ] do
+        post_event(conn, project, event_id, %{
+          "exception" => %{"values" => [%{"type" => "KeyError", "value" => "missing #{id}"}]}
+        })
+      end
+
+      assert [%ErrorEvent{occurrence_count: 2}, %ErrorEvent{occurrence_count: 2}] =
+               project_issues(project)
+    end
+
+    test "groups by the SDK fingerprint, expanding {{ default }}", %{
+      conn: conn,
+      project: project
+    } do
+      post_event(conn, project, "74a2f0e6085d44ef7a7c8a67cc55c991", %{
+        "fingerprint" => ["billing", "timeout"]
+      })
+
+      post_event(conn, project, "74a2f0e6085d44ef7a7c8a67cc55c992", %{
+        "fingerprint" => ["billing", "timeout"],
+        "exception" => %{"values" => [%{"type" => "TimeoutError", "value" => "slow"}]}
+      })
+
+      post_event(conn, project, "74a2f0e6085d44ef7a7c8a67cc55c993", %{
+        "fingerprint" => ["{{ default }}", "tenant-a"]
+      })
+
+      post_event(conn, project, "74a2f0e6085d44ef7a7c8a67cc55c994", %{
+        "fingerprint" => ["{{ default }}", "tenant-b"]
+      })
+
+      assert [2, 1, 1] =
+               project
+               |> project_issues()
+               |> Enum.map(& &1.occurrence_count)
+               |> Enum.sort(:desc)
+    end
+
+    test "moves an issue with a pre-v2 fingerprint to the new one", %{
+      conn: conn,
+      project: project
+    } do
+      payload = error_payload("75a2f0e6085d44ef7a7c8a67cc55c991")
+      legacy_issue = issue_fixture(project, %{fingerprint: "RuntimeError|boom|job.ex"})
+      assert legacy_issue.fingerprint == Argus.Ingest.legacy_fingerprint_for_payload(payload)
+
+      post_event(conn, project, payload["event_id"], payload)
+
+      assert [issue] = project_issues(project)
+      assert issue.id == legacy_issue.id
+      assert issue.fingerprint == Argus.Ingest.fingerprint_for_payload(payload)
+      assert issue.occurrence_count == legacy_issue.occurrence_count + 1
+    end
+
     test "reads envelopes larger than a single read_body chunk", %{
       conn: conn,
       project: project
@@ -637,6 +798,25 @@ defmodule ArgusWeb.IngestControllerTest do
 
       assert %{"id" => ^event_id} = json_response(conn, 200)
     end
+  end
+
+  defp post_event(conn, project, event_id, overrides) do
+    payload_json = event_id |> error_payload(overrides) |> Jason.encode!()
+
+    conn
+    |> put_req_header("content-type", "application/x-sentry-envelope")
+    |> post(
+      ~p"/api/#{project.id}/envelope/?sentry_key=#{project.dsn_key}",
+      build_envelope(
+        %{"event_id" => event_id},
+        [%{"type" => "event", "length" => byte_size(payload_json)}, payload_json]
+      )
+    )
+    |> json_response(200)
+  end
+
+  defp project_issues(project) do
+    Repo.all(from error_event in ErrorEvent, where: error_event.project_id == ^project.id)
   end
 
   defp error_payload(event_id, overrides \\ %{}) do

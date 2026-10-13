@@ -261,6 +261,7 @@ defmodule Argus.Ingest do
 
     %{
       fingerprint: fingerprint_for_payload(payload),
+      legacy_fingerprint: legacy_fingerprint_for_payload(payload),
       title: title_for_payload(payload),
       culprit:
         payload["culprit"] || payload["transaction"] || get_in(payload, ["request", "url"]),
@@ -308,26 +309,118 @@ defmodule Argus.Ingest do
     end
   end
 
-  # Fingerprints stay in an indexed varchar(255) column. Long ones (huge
-  # exception messages) are hashed; short ones are kept verbatim so existing
-  # issues keep grouping the same way.
-  @max_fingerprint_length 255
+  # Grouping follows Sentry: an SDK-provided `fingerprint` wins (with
+  # `{{ default }}` expanding to the default grouping); otherwise exceptions
+  # with a stacktrace group by type and frames, ignoring the message, and
+  # everything else groups by its message with variable parts (numbers, ids,
+  # hex) masked. The result is hashed so it always fits the varchar(255) column.
+  @fingerprint_version "v2"
 
-  defp fingerprint_for_payload(payload) do
-    payload
-    |> raw_fingerprint_for_payload()
-    |> bound_fingerprint()
+  @doc false
+  def fingerprint_for_payload(payload) do
+    default = default_grouping_components(payload)
+
+    components =
+      case payload["fingerprint"] do
+        [_ | _] = values ->
+          Enum.flat_map(values, fn value ->
+            if default_fingerprint_placeholder?(value), do: default, else: [to_string(value)]
+          end)
+
+        _ ->
+          default
+      end
+
+    raw = Enum.join([@fingerprint_version | components], "\n")
+    @fingerprint_version <> ":" <> Base.encode16(:crypto.hash(:sha256, raw), case: :lower)
   end
 
-  defp bound_fingerprint(fingerprint) when is_binary(fingerprint) do
-    if String.length(fingerprint) <= @max_fingerprint_length do
+  defp default_fingerprint_placeholder?(value) when is_binary(value) do
+    String.replace(value, ~r/\s+/, "") == "{{default}}"
+  end
+
+  defp default_fingerprint_placeholder?(_value), do: false
+
+  defp default_grouping_components(payload) do
+    case exception_values(payload) do
+      [_ | _] = exceptions ->
+        Enum.flat_map(exceptions, &exception_grouping_components/1)
+
+      [] ->
+        message =
+          get_in(payload, ["logentry", "message"]) || payload["message"] ||
+            get_in(payload, ["logentry", "formatted"]) || title_for_payload(payload)
+
+        ["message", normalize_grouping_message(message)]
+    end
+  end
+
+  defp exception_grouping_components(exception) do
+    type = exception["type"] || "error"
+
+    case grouping_frames(exception) do
+      [] -> ["exception", type, normalize_grouping_message(exception["value"])]
+      frames -> ["exception", type | frames]
+    end
+  end
+
+  # Only in-app frames count when the SDK marks any; otherwise all frames do.
+  # Line numbers are left out so unrelated edits don't split an issue.
+  defp grouping_frames(exception) do
+    frames =
+      case get_in(exception, ["stacktrace", "frames"]) do
+        frames when is_list(frames) -> Enum.filter(frames, &is_map/1)
+        _ -> []
+      end
+
+    frames =
+      case Enum.filter(frames, &(&1["in_app"] == true)) do
+        [] -> frames
+        in_app -> in_app
+      end
+
+    frames
+    |> Enum.map(fn frame ->
+      location = frame["module"] || frame["filename"] || frame["abs_path"]
+      function = frame["function"]
+
+      if location || function, do: "#{location}|#{function}"
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @uuid_pattern ~r/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i
+  @hex_pattern ~r/\b(?:0x[0-9a-f]+|(?=[0-9a-f]*\d)[0-9a-f]{8,})\b/i
+  @number_pattern ~r/\d+/
+
+  defp normalize_grouping_message(message) when is_binary(message) do
+    message
+    |> String.replace(@uuid_pattern, "<uuid>")
+    |> String.replace(@hex_pattern, "<hex>")
+    |> String.replace(@number_pattern, "<int>")
+  end
+
+  defp normalize_grouping_message(nil), do: ""
+
+  defp normalize_grouping_message(message),
+    do: message |> to_string() |> normalize_grouping_message()
+
+  # The fingerprint scheme used before v2. Issues created back then are moved to
+  # their v2 fingerprint the first time a matching event arrives.
+  @max_legacy_fingerprint_length 255
+
+  @doc false
+  def legacy_fingerprint_for_payload(payload) do
+    fingerprint = raw_legacy_fingerprint_for_payload(payload)
+
+    if String.length(fingerprint) <= @max_legacy_fingerprint_length do
       fingerprint
     else
       "sha256:" <> Base.encode16(:crypto.hash(:sha256, fingerprint), case: :lower)
     end
   end
 
-  defp raw_fingerprint_for_payload(payload) do
+  defp raw_legacy_fingerprint_for_payload(payload) do
     case exception_values(payload) do
       [%{} = exception | _] ->
         first_frame =

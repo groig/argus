@@ -585,6 +585,13 @@ defmodule Argus.Projects do
         occurrence -> {:ok, occurrence}
       end
     end)
+    |> Multi.run(:migrated_issue, fn repo, %{existing_occurrence: existing_occurrence} ->
+      if existing_occurrence do
+        {:ok, 0}
+      else
+        migrate_legacy_fingerprint(repo, project, issue_attrs)
+      end
+    end)
     |> Multi.run(:inserted_issue, fn repo, %{existing_occurrence: existing_occurrence} ->
       if existing_occurrence do
         {:ok, nil}
@@ -732,6 +739,35 @@ defmodule Argus.Projects do
         error
     end
   end
+
+  # Issues created before a fingerprint scheme change keep their old
+  # fingerprint. Move such an issue to the new one, unless an issue with the
+  # new fingerprint already exists, so its next event joins it instead of
+  # opening a duplicate.
+  defp migrate_legacy_fingerprint(repo, project, %{legacy_fingerprint: legacy} = issue_attrs)
+       when is_binary(legacy) and legacy != issue_attrs.fingerprint do
+    fingerprint = issue_attrs.fingerprint
+
+    current_exists =
+      from(error_event in ErrorEvent,
+        where: error_event.project_id == ^project.id and error_event.fingerprint == ^fingerprint,
+        select: 1
+      )
+
+    {count, _} =
+      repo.update_all(
+        from(error_event in ErrorEvent,
+          where:
+            error_event.project_id == ^project.id and error_event.fingerprint == ^legacy and
+              not exists(subquery(current_exists))
+        ),
+        set: [fingerprint: fingerprint]
+      )
+
+    {:ok, count}
+  end
+
+  defp migrate_legacy_fingerprint(_repo, _project, _issue_attrs), do: {:ok, 0}
 
   defp update_existing_issue(repo, error_event, issue_attrs, now) do
     status =
