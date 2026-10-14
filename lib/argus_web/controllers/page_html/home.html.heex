@@ -12,16 +12,7 @@
         </p>
       </div>
       <div>
-        <.button
-          class="w-full"
-          navigate={
-            if @current_scope && @current_scope.user,
-              do: ArgusWeb.UserAuth.signed_in_path(@current_scope.user),
-              else: ~p"/login"
-          }
-        >
-          {if @current_scope && @current_scope.user, do: "Open dashboard", else: "Log in"}
-        </.button>
+        <.button class="w-full" navigate={~p"/login"}>Log in</.button>
       </div>
     </div>
   </section>

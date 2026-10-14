@@ -9,6 +9,15 @@ defmodule ArgusWeb.PageControllerTest do
     refute response =~ "Self-hosted Sentry-compatible ingestion"
   end
 
+  test "GET / redirects signed-in users to the dashboard", %{conn: conn} do
+    conn =
+      conn
+      |> log_in_user(Argus.AccountsFixtures.user_fixture())
+      |> get(~p"/")
+
+    assert redirected_to(conn) == ~p"/projects"
+  end
+
   test "GET /users/register returns 404", %{conn: conn} do
     conn = get(conn, ~p"/users/register")
     assert response(conn, 404) == "Not found"

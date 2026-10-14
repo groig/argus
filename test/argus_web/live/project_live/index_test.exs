@@ -21,7 +21,12 @@ defmodule ArgusWeb.ProjectLive.IndexTest do
       |> live(~p"/projects")
 
     assert has_element?(view, "#app-sidebar.sticky.overflow-y-auto")
-    assert has_element?(view, "#project-card-#{project.id}")
+
+    assert has_element?(
+             view,
+             ~s(a#project-card-#{project.id}[href="/projects/#{project.slug}/issues"])
+           )
+
     assert render(view) =~ "Recent issues"
     assert render(view) =~ "My First Project"
   end

@@ -110,23 +110,24 @@ defmodule ArgusWeb.ProjectLive.Index do
                   <div>
                     <h2 class="text-lg font-semibold tracking-tight text-zinc-950">Projects</h2>
                     <p class="mt-1 text-sm text-zinc-500">
-                      Open issues, inspect logs, or edit project settings.
+                      Open a project to view its issues, logs, metrics, and settings.
                     </p>
                   </div>
                 </div>
 
                 <div class="mt-6 grid min-w-0 gap-4 xl:grid-cols-2">
-                  <article
+                  <.link
                     :for={project <- @projects}
                     id={"project-card-#{project.id}"}
+                    navigate={~p"/projects/#{project.slug}/issues"}
                     class={[
-                      "min-w-0 border border-t-4 border-zinc-200 bg-slate-50 p-4 transition hover:border-sky-200 hover:bg-white sm:p-5",
+                      "group block min-w-0 border border-t-4 border-zinc-200 bg-slate-50 p-4 transition hover:border-sky-200 hover:bg-white hover:shadow-[0_4px_14px_rgba(15,23,42,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 sm:p-5",
                       project_accent_border_class(project)
                     ]}
                   >
                     <div class="flex items-start justify-between gap-4">
                       <div class="min-w-0">
-                        <p class="break-words text-base font-semibold text-zinc-950">
+                        <p class="break-words text-base font-semibold text-zinc-950 transition group-hover:text-sky-700">
                           {project.name}
                         </p>
                         <p class="mt-1 break-all font-mono text-xs text-zinc-500">{project.slug}</p>
@@ -199,19 +200,7 @@ defmodule ArgusWeb.ProjectLive.Index do
                         </p>
                       <% end %>
                     </div>
-
-                    <div class="mt-5 flex flex-wrap gap-2">
-                      <.button navigate={~p"/projects/#{project.slug}/issues"} variant="secondary">
-                        Issues
-                      </.button>
-                      <.button navigate={~p"/projects/#{project.slug}/logs"} variant="secondary">
-                        Logs
-                      </.button>
-                      <.button navigate={~p"/projects/#{project.slug}/metrics"} variant="secondary">
-                        Metrics
-                      </.button>
-                    </div>
-                  </article>
+                  </.link>
                 </div>
               </section>
 
