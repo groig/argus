@@ -7,6 +7,7 @@ defmodule Argus.Accounts.UserToken do
   @rand_size 32
   @session_validity_in_days 14
   @invitation_validity_in_hours 72
+  @reset_password_validity_in_hours 1
 
   schema "users_tokens" do
     field :token, :binary
@@ -52,14 +53,22 @@ defmodule Argus.Accounts.UserToken do
   end
 
   def verify_invitation_token_query(token) do
+    verify_email_token_query(token, "invite", @invitation_validity_in_hours)
+  end
+
+  def verify_reset_password_token_query(token) do
+    verify_email_token_query(token, "reset_password", @reset_password_validity_in_hours)
+  end
+
+  defp verify_email_token_query(token, context, validity_in_hours) do
     case Base.url_decode64(token, padding: false) do
       {:ok, decoded_token} ->
         hashed_token = :crypto.hash(@hash_algorithm, decoded_token)
 
         query =
-          from token in by_token_and_context_query(hashed_token, "invite"),
+          from token in by_token_and_context_query(hashed_token, context),
             join: user in assoc(token, :user),
-            where: token.inserted_at > ago(^@invitation_validity_in_hours, "hour"),
+            where: token.inserted_at > ago(^validity_in_hours, "hour"),
             where: token.sent_to == user.email,
             select: {user, token}
 

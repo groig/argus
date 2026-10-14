@@ -43,4 +43,30 @@ defmodule Argus.Accounts.UserNotifier do
 
     deliver(invitation.email, "You're invited to Argus", text_body, html_body)
   end
+
+  def deliver_reset_password_instructions(%User{} = user, url) do
+    text_body = """
+    #{user.email},
+
+    Someone asked to reset the password for your Argus account.
+
+    Choose a new password:
+    #{url}
+
+    This link expires in 1 hour. If you didn't ask for this, you can ignore this email.
+    """
+
+    html_body = """
+    <div style="font-family: ui-sans-serif, system-ui, sans-serif; color: #111827; line-height: 1.6; max-width: 560px; margin: 0 auto; padding: 24px;">
+      <p style="margin: 0 0 12px 0;">#{user.email},</p>
+      <p style="margin: 0 0 18px 0;">Someone asked to reset the password for your Argus account.</p>
+      <p style="margin: 0 0 24px 0;">
+        <a href="#{url}" style="display: inline-block; background: #111827; color: #ffffff; text-decoration: none; border-radius: 9999px; padding: 12px 18px; font-weight: 600;">Reset password</a>
+      </p>
+      <p style="margin: 0; color: #6b7280;">This link expires in 1 hour. If you didn't ask for this, you can ignore this email.</p>
+    </div>
+    """
+
+    deliver(user.email, "Reset your Argus password", text_body, html_body)
+  end
 end

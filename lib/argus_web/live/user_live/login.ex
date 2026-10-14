@@ -54,6 +54,16 @@ defmodule ArgusWeb.UserLive.Login do
             </label>
             <.button class="w-full">Log in</.button>
           </.form>
+
+          <p class="text-center text-sm">
+            <.link
+              id="forgot-password-link"
+              navigate={~p"/reset-password"}
+              class="text-zinc-500 underline-offset-4 transition hover:text-zinc-950 hover:underline"
+            >
+              Forgot your password?
+            </.link>
+          </p>
         </div>
       </section>
     </Layouts.app>

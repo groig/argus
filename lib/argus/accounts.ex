@@ -94,6 +94,56 @@ defmodule Argus.Accounts do
     end
   end
 
+  ## Password reset
+
+  @doc """
+  Emails a password reset link to an active user, replacing any earlier reset link.
+
+  Pending invited users have no password yet, so they are skipped; they should use their
+  invitation instead.
+  """
+  def deliver_user_reset_password_instructions(%User{} = user, reset_password_url_fun)
+      when is_function(reset_password_url_fun, 1) do
+    if user.confirmed_at do
+      {encoded_token, user_token} = UserToken.build_email_token(user, "reset_password")
+
+      {:ok, _} =
+        Multi.new()
+        |> Multi.delete_all(
+          :delete_tokens,
+          from(token in UserToken,
+            where: token.user_id == ^user.id and token.context == "reset_password"
+          )
+        )
+        |> Multi.insert(:user_token, user_token)
+        |> Repo.transact()
+
+      UserNotifier.deliver_reset_password_instructions(
+        user,
+        reset_password_url_fun.(encoded_token)
+      )
+    else
+      {:error, :not_confirmed}
+    end
+  end
+
+  def get_user_by_reset_password_token(token) when is_binary(token) do
+    with {:ok, query} <- UserToken.verify_reset_password_token_query(token),
+         {%User{confirmed_at: %DateTime{}} = user, _user_token} <- Repo.one(query) do
+      user
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Sets a new password. Like `update_user_password/2`, this deletes every token for the user,
+  including the reset token and all sessions.
+  """
+  def reset_user_password(%User{} = user, attrs) do
+    update_user_password(user, attrs)
+  end
+
   def generate_user_session_token(user) do
     {token, user_token} = UserToken.build_session_token(user)
     Repo.insert!(user_token)

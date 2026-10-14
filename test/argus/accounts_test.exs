@@ -251,4 +251,80 @@ defmodule Argus.AccountsTest do
       assert %{name: ["can't be blank"]} = errors_on(changeset)
     end
   end
+
+  describe "password reset" do
+    test "delivers a reset link that resolves back to the user" do
+      user = user_fixture()
+
+      token =
+        extract_user_token(fn url ->
+          Accounts.deliver_user_reset_password_instructions(user, url)
+        end)
+
+      assert Repo.get_by!(UserToken, user_id: user.id, context: "reset_password").sent_to ==
+               user.email
+
+      assert Accounts.get_user_by_reset_password_token(token).id == user.id
+    end
+
+    test "only the latest reset link is valid" do
+      user = user_fixture()
+      deliver = fn url -> Accounts.deliver_user_reset_password_instructions(user, url) end
+
+      old_token = extract_user_token(deliver)
+      new_token = extract_user_token(deliver)
+
+      refute Accounts.get_user_by_reset_password_token(old_token)
+      assert Accounts.get_user_by_reset_password_token(new_token)
+    end
+
+    test "does not send reset links to pending invited users" do
+      user = pending_user_fixture()
+      assert_email_sent(subject: "You're invited to Argus")
+
+      assert {:error, :not_confirmed} =
+               Accounts.deliver_user_reset_password_instructions(user, &"/#{&1}")
+
+      assert_no_email_sent()
+    end
+
+    test "rejects invalid and expired tokens" do
+      user = user_fixture()
+
+      token =
+        extract_user_token(fn url ->
+          Accounts.deliver_user_reset_password_instructions(user, url)
+        end)
+
+      refute Accounts.get_user_by_reset_password_token("oops")
+
+      {1, nil} =
+        Repo.update_all(
+          from(t in UserToken, where: t.user_id == ^user.id and t.context == "reset_password"),
+          set: [inserted_at: DateTime.add(DateTime.utc_now(:second), -2, :hour)]
+        )
+
+      refute Accounts.get_user_by_reset_password_token(token)
+    end
+
+    test "resetting the password deletes all tokens" do
+      user = user_fixture()
+      _session = Accounts.generate_user_session_token(user)
+
+      token =
+        extract_user_token(fn url ->
+          Accounts.deliver_user_reset_password_instructions(user, url)
+        end)
+
+      assert {:ok, {_user, _expired}} =
+               Accounts.reset_user_password(user, %{
+                 password: "brand-new-password",
+                 password_confirmation: "brand-new-password"
+               })
+
+      refute Repo.get_by(UserToken, user_id: user.id)
+      refute Accounts.get_user_by_reset_password_token(token)
+      assert Accounts.get_user_by_email_and_password(user.email, "brand-new-password")
+    end
+  end
 end

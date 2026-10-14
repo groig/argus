@@ -30,6 +30,8 @@ defmodule ArgusWeb.Router do
     live_session :public, on_mount: [{ArgusWeb.UserAuth, :mount_current_scope}] do
       live "/login", UserLive.Login, :new
       live "/invitations/:token", UserLive.Invitation, :show
+      live "/reset-password", UserLive.ForgotPassword, :new
+      live "/reset-password/:token", UserLive.ResetPassword, :edit
     end
 
     post "/login", UserSessionController, :create
