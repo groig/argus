@@ -47,6 +47,7 @@ defmodule ArgusWeb.AgentControllerTest do
 
     assert response_content_type(conn, :markdown) =~ "text/markdown"
     assert response(conn, 200) =~ "/api/v1/projects/:slug/issues"
+    assert response(conn, 200) =~ "/api/v1/projects/:slug/issues/:id/ignore"
   end
 
   test "lists only projects the user can access", %{conn: conn, project: project} do
@@ -233,6 +234,66 @@ defmodule ArgusWeb.AgentControllerTest do
 
       assert build_conn()
              |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/resolve")
+             |> response(401)
+
+      assert Argus.Repo.reload!(issue).status == :unresolved
+    end
+  end
+
+  describe "ignore" do
+    test "ignores an issue", %{conn: conn, project: project} do
+      issue = issue_fixture(project)
+
+      body =
+        conn
+        |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/ignore")
+        |> response(200)
+
+      assert body =~ "is now ignored"
+      assert body =~ "stays ignored if a new event arrives"
+      assert Argus.Repo.reload!(issue).status == :ignored
+    end
+
+    test "succeeds for an already ignored issue", %{conn: conn, project: project} do
+      issue = issue_fixture(project, %{status: :ignored})
+
+      body =
+        conn
+        |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/ignore")
+        |> response(200)
+
+      assert body =~ "was already ignored"
+      assert Argus.Repo.reload!(issue).status == :ignored
+    end
+
+    test "returns 404 for unknown issues and inaccessible projects", %{
+      conn: conn,
+      project: project
+    } do
+      other_issue = issue_fixture(project_fixture(team_fixture()))
+
+      assert conn
+             |> post(~p"/api/v1/projects/#{project.slug}/issues/999999/ignore")
+             |> response(404)
+
+      assert conn
+             |> post(~p"/api/v1/projects/#{project.slug}/issues/abc/ignore")
+             |> response(404)
+
+      assert conn
+             |> post(
+               ~p"/api/v1/projects/#{other_issue.project.slug}/issues/#{other_issue.id}/ignore"
+             )
+             |> response(404)
+
+      assert Argus.Repo.reload!(other_issue).status == :unresolved
+    end
+
+    test "requires a token", %{project: project} do
+      issue = issue_fixture(project)
+
+      assert build_conn()
+             |> post(~p"/api/v1/projects/#{project.slug}/issues/#{issue.id}/ignore")
              |> response(401)
 
       assert Argus.Repo.reload!(issue).status == :unresolved
