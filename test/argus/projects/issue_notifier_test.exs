@@ -81,6 +81,33 @@ defmodule Argus.Projects.IssueNotifierTest do
     assert payload["missing"] == nil
   end
 
+  test "still posts the webhook when email delivery is disabled" do
+    disable_email_delivery()
+
+    %{team: team, project: project} = workspace_fixture()
+    membership_fixture(team, user_fixture())
+
+    # Insert before configuring the webhook, so the insert's own async notification stays quiet.
+    issue = insert_issue(project)
+
+    project =
+      project
+      |> configure_webhook!(~s({"text": "{{event_label}}"}))
+      |> Repo.preload(team: [team_members: :user])
+
+    issue = Repo.preload(issue, assignee: [], project: [team: [team_members: :user]])
+    issue = %{issue | project: project}
+
+    Req.Test.stub(Argus.IssueWebhookStub, fn conn ->
+      send(self(), :webhook_request)
+      Req.Test.json(conn, %{"ok" => true})
+    end)
+
+    assert :ok = IssueNotifier.deliver(issue, :created)
+    assert_receive :webhook_request
+    assert_no_email_sent()
+  end
+
   test "notifies confirmed team members when the issue is unassigned" do
     %{team: team, project: project} = workspace_fixture()
     confirmed_member = user_fixture(%{name: "Confirmed Member"})

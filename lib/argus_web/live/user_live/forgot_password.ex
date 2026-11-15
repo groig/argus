@@ -68,6 +68,15 @@ defmodule ArgusWeb.UserLive.ForgotPassword do
   end
 
   @impl true
+  def handle_event("send_email", _params, %{assigns: %{email_enabled: false}} = socket) do
+    {:noreply,
+     put_flash(
+       socket,
+       :error,
+       "This workspace doesn't send email. Ask a workspace admin to reset your password."
+     )}
+  end
+
   def handle_event("send_email", %{"user" => %{"email" => email}}, socket) do
     if user = Accounts.get_user_by_email(email) do
       Accounts.deliver_user_reset_password_instructions(user, &url(~p"/reset-password/#{&1}"))

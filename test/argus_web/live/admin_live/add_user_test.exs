@@ -89,7 +89,7 @@ defmodule ArgusWeb.AdminLive.AddUserTest do
     })
 
     user = Accounts.get_user_by_email(email)
-    invitation = Accounts.get_pending_invitation(user)
+    invitation = Accounts.get_pending_invitation(user_scope_fixture(admin_fixture()), user)
 
     assert has_element?(view, "#invite-result")
 

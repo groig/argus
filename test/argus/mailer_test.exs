@@ -1,11 +1,20 @@
+defmodule Argus.MailerTest.ExitingStorage do
+  @moduledoc false
+  # Stands in for Swoosh's local mailbox when its process is down: the exit reason carries the
+  # call arguments, email included, like a real `GenServer.call` to a missing process.
+  def push(email), do: exit({:noproc, {GenServer, :call, [__MODULE__, {:push, email}, 5000]}})
+end
+
 defmodule Argus.MailerTest do
   # Changes global mailer config.
   use Argus.DataCase, async: false
 
   import Argus.AccountsFixtures
+  import ExUnit.CaptureLog
   import Swoosh.TestAssertions
 
   alias Argus.Accounts
+  alias Argus.Accounts.UserToken
   alias Argus.Mailer
 
   describe "enabled?/0" do
@@ -48,6 +57,45 @@ defmodule Argus.MailerTest do
     end
   end
 
+  describe "try_deliver/1" do
+    setup do
+      mailer_config = Application.get_env(:argus, Mailer, [])
+      on_exit(fn -> Application.put_env(:argus, Mailer, mailer_config) end)
+      :ok
+    end
+
+    test "turns adapter crashes into errors without logging the email" do
+      Application.put_env(:argus, Mailer,
+        adapter: Swoosh.Adapters.Local,
+        storage_driver: Argus.MailerTest.ExitingStorage,
+        enabled: true
+      )
+
+      email =
+        Swoosh.Email.new(
+          to: "someone@example.com",
+          from: "argus@example.com",
+          subject: "Reset your Argus password",
+          text_body: "https://argus.test/reset-password/SECRET-TOKEN"
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:exit, {:noproc, {GenServer, :call, 3}}}} = Mailer.try_deliver(email)
+        end)
+
+      assert log =~ "Reset your Argus password"
+      refute log =~ "SECRET-TOKEN"
+      refute log =~ "someone@example.com"
+    end
+
+    test "returns :disabled without touching the adapter" do
+      disable_email_delivery()
+      assert {:error, :disabled} = Mailer.try_deliver(Swoosh.Email.new(subject: "Hi"))
+      assert_no_email_sent()
+    end
+  end
+
   describe "with email delivery disabled" do
     setup do
       disable_email_delivery()
@@ -83,7 +131,7 @@ defmodule Argus.MailerTest do
       assert_no_email_sent()
     end
 
-    test "password reset requests don't send anything" do
+    test "password reset requests don't send anything or create undeliverable tokens" do
       user = user_fixture()
 
       assert {:error, :disabled} =
@@ -91,6 +139,8 @@ defmodule Argus.MailerTest do
                  user,
                  &"https://argus.test/#{&1}"
                )
+
+      refute Repo.get_by(UserToken, user_id: user.id, context: "reset_password")
 
       assert_no_email_sent()
     end

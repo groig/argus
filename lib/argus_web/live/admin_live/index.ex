@@ -2,7 +2,7 @@ defmodule ArgusWeb.AdminLive.Index do
   use ArgusWeb, :live_view
 
   alias Argus.Accounts
-  alias Argus.Accounts.User
+  alias Argus.Accounts.{Scope, User}
   alias Argus.Mailer
   alias Argus.Projects
   alias Argus.Teams
@@ -494,6 +494,11 @@ defmodule ArgusWeb.AdminLive.Index do
                 phx-submit="set-user-password"
                 class="grid gap-4 sm:grid-cols-2"
               >
+                <input
+                  type="hidden"
+                  name="user_password[expected_state]"
+                  value={if @selected_user.confirmed_at, do: "active", else: "pending"}
+                />
                 <.input
                   field={@password_form[:password]}
                   type="password"
@@ -706,7 +711,7 @@ defmodule ArgusWeb.AdminLive.Index do
     <label
       for={@id}
       class={[
-        "group flex cursor-pointer items-start gap-3 rounded-sm border px-4 py-3 transition duration-150",
+        "group flex cursor-pointer items-start gap-3 rounded-sm border px-4 py-3 transition duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-sky-500",
         if(@checked,
           do: "border-sky-500 bg-sky-50/70 ring-2 ring-sky-500/15",
           else: "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
@@ -764,8 +769,30 @@ defmodule ArgusWeb.AdminLive.Index do
        |> assign(:team_modal_open, false)
        |> assign(:user_modal_open, false)
        |> assign(:selected_user_id, nil)
+       |> attach_hook(:require_current_admin, :handle_event, &require_current_admin/3)
        |> assign_forms()
        |> load_data()}
+    end
+  end
+
+  # The socket's scope is loaded once at mount. Re-check the caller before every event so an
+  # admin who was demoted or deleted in the meantime can't keep acting from an open tab.
+  defp require_current_admin(_event, _params, socket) do
+    %Scope{user: current_user} = scope = socket.assigns.current_scope
+
+    case Accounts.get_user(current_user.id) do
+      %User{role: :admin} = user ->
+        user = %{user | authenticated_at: current_user.authenticated_at}
+        {:cont, assign(socket, :current_scope, %{scope | user: user})}
+
+      %User{} = user ->
+        {:halt,
+         socket
+         |> put_flash(:error, "You no longer have admin access.")
+         |> push_navigate(to: UserAuth.signed_in_path(user))}
+
+      nil ->
+        {:halt, redirect(socket, to: ~p"/login")}
     end
   end
 
@@ -884,8 +911,8 @@ defmodule ArgusWeb.AdminLive.Index do
 
       user ->
         form =
-          user
-          |> Accounts.change_admin_user(params, socket.assigns.current_scope.user)
+          socket.assigns.current_scope
+          |> Accounts.change_admin_user(user, params)
           |> Map.put(:action, :validate)
           |> to_form(as: :edit_user)
 
@@ -894,54 +921,72 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   def handle_event("save-user", %{"edit_user" => params}, socket) do
-    case socket.assigns.selected_user do
-      nil ->
-        {:noreply, put_flash(socket, :error, "User not found.")}
+    with {:ok, user} <- fetch_selected_user(socket),
+         {:ok, updated_user} <-
+           Accounts.admin_update_user(socket.assigns.current_scope, user, params) do
+      if updated_user.role != user.role do
+        # Live sessions reconnect and pick up the new role on mount.
+        updated_user |> Accounts.list_user_session_tokens() |> UserAuth.disconnect_sessions()
+      end
 
-      user ->
-        case Accounts.admin_update_user(user, params, socket.assigns.current_scope.user) do
-          {:ok, updated_user} ->
-            {:noreply,
-             socket
-             |> load_data()
-             |> assign(:edit_user_form, edit_user_form(updated_user, socket))
-             |> put_flash(:info, "User updated.")}
-
-          {:error, changeset} ->
-            {:noreply, assign(socket, :edit_user_form, to_form(changeset, as: :edit_user))}
+      {:noreply,
+       socket
+       |> load_data()
+       |> assign(:edit_user_form, edit_user_form(updated_user, socket))
+       |> put_flash(:info, "User updated.")}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if Keyword.has_key?(changeset.errors, :id) do
+          {:noreply, user_gone(socket)}
+        else
+          {:noreply, assign(socket, :edit_user_form, to_form(changeset, as: :edit_user))}
         end
+
+      error ->
+        {:noreply, handle_user_error(socket, error)}
     end
   end
 
   def handle_event("set-user-password", %{"user_password" => params}, socket) do
-    user = socket.assigns.selected_user
+    with {:ok, user} <- fetch_selected_user(socket),
+         :ok <- check_expected_state(user, params["expected_state"]),
+         {:ok, {_user, expired_tokens}} <-
+           Accounts.admin_set_user_password(socket.assigns.current_scope, user, params) do
+      UserAuth.disconnect_sessions(expired_tokens)
 
-    cond do
-      is_nil(user) ->
-        {:noreply, put_flash(socket, :error, "User not found.")}
+      message =
+        if user.confirmed_at,
+          do: "Password reset. They were signed out everywhere.",
+          else: "Password set. The account is active."
 
-      self?(user, socket.assigns.current_scope) ->
+      {:noreply,
+       socket
+       |> load_data()
+       |> assign(:password_form, password_form())
+       |> put_flash(:info, message)}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if Keyword.has_key?(changeset.errors, :id) do
+          {:noreply, user_gone(socket)}
+        else
+          {:noreply, assign(socket, :password_form, to_form(changeset, as: :user_password))}
+        end
+
+      {:error, :state_changed} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> assign(:password_form, password_form())
+         |> put_flash(
+           :error,
+           "This user just activated their account. Nothing was changed; review and try again."
+         )}
+
+      {:error, :self} ->
         {:noreply, put_flash(socket, :error, "Change your own password from your settings.")}
 
-      true ->
-        case Accounts.admin_set_user_password(user, params) do
-          {:ok, {_user, expired_tokens}} ->
-            UserAuth.disconnect_sessions(expired_tokens)
-
-            message =
-              if user.confirmed_at,
-                do: "Password reset. They were signed out everywhere.",
-                else: "Password set. The account is active."
-
-            {:noreply,
-             socket
-             |> load_data()
-             |> assign(:password_form, password_form())
-             |> put_flash(:info, message)}
-
-          {:error, changeset} ->
-            {:noreply, assign(socket, :password_form, to_form(changeset, as: :user_password))}
-        end
+      error ->
+        {:noreply, handle_user_error(socket, error)}
     end
   end
 
@@ -993,7 +1038,8 @@ defmodule ArgusWeb.AdminLive.Index do
         {:noreply, put_flash(socket, :error, "You cannot delete your own account here.")}
 
       user = Enum.find(socket.assigns.users, &(&1.id == user_id)) ->
-        {:ok, _user} = Accounts.delete_user(user)
+        # Deleting a user who is already gone is fine: the outcome is the same.
+        _ = Accounts.delete_user(user)
 
         {:noreply,
          socket
@@ -1008,7 +1054,7 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   defp create_user_with_password(socket, params) do
-    case Accounts.admin_create_user(params) do
+    case Accounts.admin_create_user(socket.assigns.current_scope, params) do
       {:ok, user} ->
         {:noreply,
          socket
@@ -1017,12 +1063,43 @@ defmodule ArgusWeb.AdminLive.Index do
          |> load_data()
          |> put_flash(:info, "#{user.name} was added and can log in now.")}
 
-      {:error, changeset} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply,
          socket
          |> assign(:add_user_method, "password")
          |> assign(:add_user_form, to_form(changeset, as: :user))}
+
+      error ->
+        {:noreply, handle_user_error(socket, error)}
     end
+  end
+
+  # Reloads the user shown in the edit dialog, since another admin may have changed or deleted
+  # them since the dialog opened.
+  defp fetch_selected_user(socket) do
+    case socket.assigns.selected_user && Accounts.get_user(socket.assigns.selected_user.id) do
+      %User{} = user -> {:ok, user}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  # The password form says whether it was meant to activate or to reset. If the user accepted
+  # their invitation meanwhile, don't silently replace the password they just chose.
+  defp check_expected_state(%User{confirmed_at: nil}, "pending"), do: :ok
+  defp check_expected_state(%User{confirmed_at: %DateTime{}}, "active"), do: :ok
+  defp check_expected_state(_user, _expected_state), do: {:error, :state_changed}
+
+  defp handle_user_error(socket, {:error, :not_found}), do: user_gone(socket)
+
+  defp handle_user_error(socket, {:error, :unauthorized}),
+    do: put_flash(socket, :error, "You no longer have admin access.")
+
+  defp user_gone(socket) do
+    socket
+    |> assign(:user_modal_open, false)
+    |> assign(:selected_user_id, nil)
+    |> load_data()
+    |> put_flash(:error, "This user no longer exists.")
   end
 
   defp invite_user(socket, params) do
@@ -1092,7 +1169,7 @@ defmodule ArgusWeb.AdminLive.Index do
 
   defp edit_user_form(user, socket) do
     user
-    |> Accounts.change_admin_user(%{}, socket.assigns.current_scope.user)
+    |> then(&Accounts.change_admin_user(socket.assigns.current_scope, &1))
     |> to_form(as: :edit_user)
   end
 
@@ -1115,7 +1192,8 @@ defmodule ArgusWeb.AdminLive.Index do
     |> assign(:selected_user, selected_user)
     |> assign(
       :pending_invitation,
-      selected_user && Accounts.get_pending_invitation(selected_user)
+      selected_user &&
+        Accounts.get_pending_invitation(socket.assigns.current_scope, selected_user)
     )
     |> assign(:user_team_form, user_team_form(selected_user, teams))
     |> assign(:projects, projects)
@@ -1209,15 +1287,11 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   defp available_team_options(user, teams) do
-    assigned_team_ids = MapSet.new(Enum.map(user.team_members, & &1.team_id))
+    assigned_team_ids = MapSet.new(user.team_members, & &1.team_id)
 
-    Enum.reduce(teams, [], fn team, acc ->
-      if MapSet.member?(assigned_team_ids, team.id) do
-        acc
-      else
-        acc ++ [{team.name, Integer.to_string(team.id)}]
-      end
-    end)
+    teams
+    |> Enum.reject(&MapSet.member?(assigned_team_ids, &1.id))
+    |> team_options()
   end
 
   defp selected_user(_users, nil), do: nil

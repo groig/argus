@@ -55,6 +55,32 @@ defmodule ArgusWeb.AdminLive.IndexTest do
              |> live(~p"/admin")
   end
 
+  test "an admin demoted while the panel is open can't keep acting from it", %{conn: conn} do
+    admin = admin_fixture()
+    email = unique_user_email()
+
+    {:ok, view, _html} = conn |> log_in_user(admin) |> live(~p"/admin")
+    render_click(element(view, "#open-add-user-modal"))
+
+    {:ok, _demoted} = Accounts.update_user_role(admin, :member)
+
+    assert {:error, {:live_redirect, %{to: "/projects"}}} =
+             render_submit(element(view, "#add-user-form"), %{
+               "user" => %{
+                 "method" => "password",
+                 "name" => "Backdoor Admin",
+                 "email" => email,
+                 "role" => "admin",
+                 "password" => "backdoor-password",
+                 "password_confirmation" => "backdoor-password",
+                 "team_id" => "",
+                 "team_role" => "member"
+               }
+             })
+
+    refute Accounts.get_user_by_email(email)
+  end
+
   test "resends a pending user's invitation from the user modal", %{conn: conn} do
     admin = admin_fixture()
     invitation = invitation_fixture(admin)
@@ -74,7 +100,7 @@ defmodule ArgusWeb.AdminLive.IndexTest do
     render_click(element(view, "#resend-user-invitation-#{pending_user.id}"))
 
     assert Accounts.get_invitation_by_token(old_token) == nil
-    new_invitation = Accounts.get_pending_invitation(pending_user)
+    new_invitation = Accounts.get_pending_invitation(user_scope_fixture(admin), pending_user)
     assert has_element?(view, "#user-invitation-copy[data-copy-value$='#{new_invitation.token}']")
 
     assert_email_sent(fn email ->

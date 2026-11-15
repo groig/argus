@@ -24,7 +24,7 @@ defmodule ArgusWeb.AdminLive.EditUserTest do
   end
 
   describe "closing the modal" do
-    test "with the close icon, the footer button, and Escape", %{conn: conn} do
+    test "with the close icon and the footer button", %{conn: conn} do
       member = user_fixture()
 
       view = open_user(conn, member)
@@ -33,13 +33,16 @@ defmodule ArgusWeb.AdminLive.EditUserTest do
 
       view |> reopen_user(member) |> element("#user-modal-done") |> render_click()
       refute has_element?(view, "#user-modal")
+    end
 
-      view
-      |> reopen_user(member)
-      |> element("#user-modal-panel")
-      |> render_keydown(%{"key" => "Escape"})
+    test "wires Escape through the client hook that spares focused fields", %{conn: conn} do
+      view = open_user(conn, user_fixture())
 
-      refute has_element?(view, "#user-modal")
+      # The hook runs in the browser and executes this command; the server only sees the push.
+      assert has_element?(
+               view,
+               "#user-modal-panel[phx-hook='ArgusWeb.CoreComponents.ModalEscape'][data-cancel*='close-modal']"
+             )
     end
   end
 
@@ -109,6 +112,89 @@ defmodule ArgusWeb.AdminLive.EditUserTest do
       updated = Accounts.get_user!(admin.id)
       assert updated.name == "Admin Renamed"
       assert updated.role == :admin
+    end
+  end
+
+  describe "role changes" do
+    test "disconnect the user's live sessions so the new role applies", %{conn: conn} do
+      member = user_fixture()
+      session_token = Accounts.generate_user_session_token(member)
+      ArgusWeb.Endpoint.subscribe("users_sessions:#{Base.url_encode64(session_token)}")
+
+      view = open_user(conn, member)
+
+      render_submit(element(view, "#edit-user-form"), %{
+        "edit_user" => %{"name" => member.name, "email" => member.email, "role" => "admin"}
+      })
+
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+
+    test "leave sessions alone when the role stays the same", %{conn: conn} do
+      member = user_fixture()
+      session_token = Accounts.generate_user_session_token(member)
+      ArgusWeb.Endpoint.subscribe("users_sessions:#{Base.url_encode64(session_token)}")
+
+      view = open_user(conn, member)
+
+      render_submit(element(view, "#edit-user-form"), %{
+        "edit_user" => %{"name" => "Same Role", "email" => member.email, "role" => "member"}
+      })
+
+      refute_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+  end
+
+  describe "concurrent changes" do
+    test "saving a user deleted meanwhile closes the dialog instead of crashing", %{conn: conn} do
+      member = user_fixture()
+      view = open_user(conn, member)
+      {:ok, _} = Accounts.delete_user(member)
+
+      render_submit(element(view, "#edit-user-form"), %{
+        "edit_user" => %{"name" => "Too Late", "email" => member.email}
+      })
+
+      refute has_element?(view, "#user-modal")
+      refute has_element?(view, "#edit-user-#{member.id}")
+    end
+
+    test "resetting the password of a user deleted meanwhile closes the dialog", %{conn: conn} do
+      member = user_fixture()
+      view = open_user(conn, member)
+      {:ok, _} = Accounts.delete_user(member)
+
+      render_submit(element(view, "#set-user-password-form"), %{
+        "user_password" => %{
+          "expected_state" => "active",
+          "password" => "replacement-password",
+          "password_confirmation" => "replacement-password"
+        }
+      })
+
+      refute has_element?(view, "#user-modal")
+    end
+
+    test "activating doesn't overwrite a password the user chose meanwhile", %{conn: conn} do
+      invitation = invitation_fixture()
+      view = open_user(conn, invitation.user)
+
+      {:ok, _} =
+        Accounts.accept_user_invitation(invitation.token, %{
+          password: "chosen-by-user",
+          password_confirmation: "chosen-by-user"
+        })
+
+      render_submit(element(view, "#set-user-password-form"), %{
+        "user_password" => %{
+          "password" => "admin-password",
+          "password_confirmation" => "admin-password"
+        }
+      })
+
+      assert Accounts.get_user_by_email_and_password(invitation.email, "chosen-by-user")
+      refute Accounts.get_user_by_email_and_password(invitation.email, "admin-password")
+      assert has_element?(view, "#user-status", "active")
     end
   end
 

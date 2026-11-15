@@ -608,8 +608,9 @@ defmodule ArgusWeb.CoreComponents do
   Renders a modal dialog.
 
   The body scrolls inside the viewport, so `:actions` stay reachable however long the content
-  is. Pass `on_cancel` (a `JS` command) to get a close button and Escape closing. Clicks on the
-  backdrop are ignored on purpose, so a stray click can't throw away a half-filled form.
+  is. Pass `on_cancel` (a `JS` command) to get a close button and Escape closing. To avoid
+  throwing away a half-filled form, clicks on the backdrop are ignored, and Escape pressed inside
+  a field only leaves the field; a second Escape closes the modal.
   """
   attr :id, :string, required: true
   attr :open, :boolean, default: false
@@ -632,8 +633,8 @@ defmodule ArgusWeb.CoreComponents do
     >
       <div
         id={"#{@id}-panel"}
-        phx-window-keydown={@on_cancel}
-        phx-key={@on_cancel && "escape"}
+        phx-hook=".ModalEscape"
+        data-cancel={@on_cancel}
         phx-mounted={
           JS.transition(
             {"transition ease-out duration-150", "opacity-0 translate-y-2",
@@ -672,6 +673,29 @@ defmodule ArgusWeb.CoreComponents do
         </div>
       </div>
     </div>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".ModalEscape">
+      export default {
+        mounted() {
+          this.onKeydown = (event) => {
+            if (event.key !== "Escape" || event.defaultPrevented || !this.el.dataset.cancel) return
+
+            const field = event.target.closest?.("input, textarea, select, [contenteditable]")
+
+            if (field && this.el.contains(field)) {
+              field.blur()
+              return
+            }
+
+            this.liveSocket.execJS(this.el, this.el.dataset.cancel)
+          }
+
+          window.addEventListener("keydown", this.onKeydown)
+        },
+        destroyed() {
+          window.removeEventListener("keydown", this.onKeydown)
+        }
+      }
+    </script>
     """
   end
 

@@ -43,7 +43,11 @@ defmodule ArgusWeb.AdminLive.EmailDisabledTest do
       }
     })
 
-    invitation = email |> Accounts.get_user_by_email() |> Accounts.get_pending_invitation()
+    invitation =
+      Accounts.get_pending_invitation(
+        user_scope_fixture(admin_fixture()),
+        Accounts.get_user_by_email(email)
+      )
 
     assert has_element?(view, "#invite-result-message", "Email delivery is not configured")
     assert has_element?(view, "#invite-result-copy[data-copy-value$='#{invitation.token}']")
@@ -62,5 +66,17 @@ defmodule ArgusWeb.AdminLive.EmailDisabledTest do
 
     refute has_element?(view, "#reset-password-form")
     assert has_element?(view, "#reset-password-email-disabled")
+  end
+
+  test "a reset request pushed anyway creates no token", %{conn: conn} do
+    user = user_fixture()
+    {:ok, view, _html} = live(conn, ~p"/reset-password")
+
+    render_hook(view, "send_email", %{"user" => %{"email" => user.email}})
+
+    refute Argus.Repo.get_by(Argus.Accounts.UserToken,
+             user_id: user.id,
+             context: "reset_password"
+           )
   end
 end
