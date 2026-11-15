@@ -604,9 +604,19 @@ defmodule ArgusWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a modal dialog.
+
+  The body scrolls inside the viewport, so `:actions` stay reachable however long the content
+  is. Pass `on_cancel` (a `JS` command) to get a close button and Escape closing. Clicks on the
+  backdrop are ignored on purpose, so a stray click can't throw away a half-filled form.
+  """
   attr :id, :string, required: true
   attr :open, :boolean, default: false
   attr :title, :string, required: true
+  attr :subtitle, :string, default: nil
+  attr :size, :string, values: ~w(md lg), default: "md"
+  attr :on_cancel, JS, default: nil
   slot :inner_block, required: true
   slot :actions
 
@@ -615,16 +625,58 @@ defmodule ArgusWeb.CoreComponents do
     <div
       :if={@open}
       id={@id}
-      class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 px-4 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={"#{@id}-title"}
+      class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 p-4 backdrop-blur-[2px]"
     >
-      <div class="w-full max-w-md border border-zinc-200 bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
-        <h3 class="text-lg font-semibold text-zinc-950">{@title}</h3>
-        <div class="mt-4 text-sm leading-6 text-zinc-600">{render_slot(@inner_block)}</div>
-        <div :if={@actions != []} class="mt-6 flex justify-end gap-3">{render_slot(@actions)}</div>
+      <div
+        id={"#{@id}-panel"}
+        phx-window-keydown={@on_cancel}
+        phx-key={@on_cancel && "escape"}
+        phx-mounted={
+          JS.transition(
+            {"transition ease-out duration-150", "opacity-0 translate-y-2",
+             "opacity-100 translate-y-0"}
+          )
+        }
+        class={[
+          "flex max-h-[calc(100dvh-2rem)] w-full flex-col border border-zinc-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.18)]",
+          modal_size(@size)
+        ]}
+      >
+        <div class="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-4">
+          <div class="min-w-0">
+            <h3 id={"#{@id}-title"} class="text-lg font-semibold text-zinc-950">{@title}</h3>
+            <p :if={@subtitle} class="mt-0.5 truncate text-sm text-zinc-500">{@subtitle}</p>
+          </div>
+          <button
+            :if={@on_cancel}
+            id={"#{@id}-close"}
+            type="button"
+            phx-click={@on_cancel}
+            aria-label="Close"
+            class="-mr-2 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-sm text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-sky-300"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5 text-sm leading-6 text-zinc-600">
+          {render_slot(@inner_block)}
+        </div>
+        <div
+          :if={@actions != []}
+          class="flex justify-end gap-3 border-t border-zinc-200 bg-slate-50 px-6 py-3"
+        >
+          {render_slot(@actions)}
+        </div>
       </div>
     </div>
     """
   end
+
+  defp modal_size("md"), do: "max-w-md"
+  defp modal_size("lg"), do: "max-w-2xl"
 
   attr :name, :string, required: true
   attr :class, :any, default: "size-4"

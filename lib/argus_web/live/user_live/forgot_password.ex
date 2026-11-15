@@ -12,12 +12,26 @@ defmodule ArgusWeb.UserLive.ForgotPassword do
           <div class="space-y-3 text-center">
             <p class="text-xs uppercase tracking-[0.22em] text-zinc-500">Argus</p>
             <h1 class="text-3xl font-semibold tracking-tight text-zinc-950">Forgot your password?</h1>
-            <p class="text-sm leading-6 text-zinc-500">
+            <p :if={@email_enabled} class="text-sm leading-6 text-zinc-500">
               Enter your account email and we'll send you a link to choose a new one.
             </p>
           </div>
 
-          <.form for={@form} id="reset-password-form" phx-submit="send_email" class="space-y-5">
+          <p
+            :if={!@email_enabled}
+            id="reset-password-email-disabled"
+            class="border border-zinc-200 bg-slate-50 px-4 py-3 text-center text-sm leading-6 text-zinc-600"
+          >
+            This workspace doesn't send email. Ask a workspace admin to reset your password from the admin panel.
+          </p>
+
+          <.form
+            :if={@email_enabled}
+            for={@form}
+            id="reset-password-form"
+            phx-submit="send_email"
+            class="space-y-5"
+          >
             <.input
               field={@form[:email]}
               type="email"
@@ -46,7 +60,11 @@ defmodule ArgusWeb.UserLive.ForgotPassword do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, form: to_form(%{"email" => ""}, as: :user))}
+    {:ok,
+     assign(socket,
+       form: to_form(%{"email" => ""}, as: :user),
+       email_enabled: Argus.Mailer.enabled?()
+     )}
   end
 
   @impl true

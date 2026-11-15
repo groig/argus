@@ -1,21 +1,41 @@
 defmodule Argus.Accounts.UserNotifier do
   import Swoosh.Email
 
+  require Logger
+
   alias Argus.Mailer
   alias Argus.Accounts.{Invitation, User}
 
+  # Returns `{:ok, email}`, `{:error, :disabled}` when no mailer is configured, or
+  # `{:error, reason}` when delivery fails. Callers run after their database writes, so a broken
+  # mailer must never raise into them.
   defp deliver(recipient, subject, text_body, html_body) do
-    email =
-      new()
-      |> to(recipient)
-      |> from(Mailer.from())
-      |> subject(subject)
-      |> text_body(text_body)
-      |> html_body(html_body)
+    if Mailer.enabled?() do
+      email =
+        new()
+        |> to(recipient)
+        |> from(Mailer.from())
+        |> subject(subject)
+        |> text_body(text_body)
+        |> html_body(html_body)
 
-    with {:ok, _metadata} <- Mailer.deliver(email) do
-      {:ok, email}
+      case safe_deliver(email) do
+        {:ok, _metadata} ->
+          {:ok, email}
+
+        {:error, reason} ->
+          Logger.warning("Could not deliver #{inspect(subject)} email: #{inspect(reason)}")
+          {:error, reason}
+      end
+    else
+      {:error, :disabled}
     end
+  end
+
+  defp safe_deliver(email) do
+    Mailer.deliver(email)
+  catch
+    kind, reason -> {:error, {kind, reason}}
   end
 
   def deliver_invitation_instructions(%Invitation{} = invitation, %User{} = inviter, url) do

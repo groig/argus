@@ -13,6 +13,13 @@ defmodule ArgusWeb.UserLive.LoginTest do
       assert html =~ ~s(id="login-form")
     end
 
+    test "links to the password reset flow when email is configured", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/login")
+
+      assert has_element?(view, "#forgot-password-link")
+      refute has_element?(view, "#forgot-password-admin-hint")
+    end
+
     test "redirects signed-in users to the dashboard", %{conn: conn} do
       %{user: user} = workspace_fixture()
 

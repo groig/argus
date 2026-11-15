@@ -5,7 +5,7 @@ defmodule Argus.AccountsTest do
 
   alias Argus.Accounts
   alias Argus.Accounts.{Invitation, User, UserToken}
-  alias Argus.Repo
+  alias Argus.{Repo, Teams}
 
   import Argus.AccountsFixtures
   import Argus.WorkspaceFixtures
@@ -61,7 +61,7 @@ defmodule Argus.AccountsTest do
       inviter = admin_fixture(%{name: "Admin Person"})
       email = unique_user_email()
 
-      {:ok, invitation} =
+      {:ok, invitation, :sent} =
         Accounts.deliver_user_invitation(
           inviter,
           %{email: email, name: "Invited Member", role: "member"},
@@ -106,7 +106,7 @@ defmodule Argus.AccountsTest do
       old_token = invitation.token
       assert_email_sent(fn email -> email.text_body =~ old_token end)
 
-      {:ok, resent_invitation} =
+      {:ok, resent_invitation, :sent} =
         Accounts.resend_user_invitation(
           inviter,
           invitation.user,
@@ -325,6 +325,254 @@ defmodule Argus.AccountsTest do
       refute Repo.get_by(UserToken, user_id: user.id)
       refute Accounts.get_user_by_reset_password_token(token)
       assert Accounts.get_user_by_email_and_password(user.email, "brand-new-password")
+    end
+  end
+
+  describe "deliver_user_invitation/3 with a team" do
+    test "adds the invited user to the team in the same transaction" do
+      inviter = admin_fixture()
+      team = team_fixture()
+
+      {:ok, invitation, :sent} =
+        Accounts.deliver_user_invitation(
+          inviter,
+          %{
+            "email" => unique_user_email(),
+            "name" => "Invited Member",
+            "role" => "member",
+            "team_id" => Integer.to_string(team.id),
+            "team_role" => "admin"
+          },
+          &"https://argus.test/invitations/#{&1}"
+        )
+
+      assert Teams.member_role(invitation.user, team) == :admin
+    end
+
+    test "rolls back the user when the team does not exist" do
+      inviter = admin_fixture()
+      email = unique_user_email()
+
+      assert {:error, changeset} =
+               Accounts.deliver_user_invitation(
+                 inviter,
+                 %{"email" => email, "name" => "Ghost", "role" => "member", "team_id" => "-1"},
+                 &"https://argus.test/invitations/#{&1}"
+               )
+
+      assert %{team_id: ["does not exist"]} = errors_on(changeset)
+      refute Accounts.get_user_by_email(email)
+    end
+  end
+
+  describe "admin_create_user/1" do
+    test "creates an active user that can log in, without sending email" do
+      email = unique_user_email()
+
+      assert {:ok, user} =
+               Accounts.admin_create_user(%{
+                 "email" => email,
+                 "name" => "Direct User",
+                 "role" => "member",
+                 "password" => "direct-password",
+                 "password_confirmation" => "direct-password"
+               })
+
+      assert user.confirmed_at
+      assert Accounts.get_user_by_email_and_password(email, "direct-password")
+      assert_no_email_sent()
+    end
+
+    test "adds the user to a team with the chosen role" do
+      team = team_fixture()
+
+      assert {:ok, user} =
+               Accounts.admin_create_user(%{
+                 "email" => unique_user_email(),
+                 "name" => "Team User",
+                 "role" => "member",
+                 "password" => "direct-password",
+                 "password_confirmation" => "direct-password",
+                 "team_id" => Integer.to_string(team.id),
+                 "team_role" => "member"
+               })
+
+      assert Teams.member_role(user, team) == :member
+    end
+
+    test "validates the password and the team" do
+      assert {:error, changeset} =
+               Accounts.admin_create_user(%{
+                 "email" => unique_user_email(),
+                 "name" => "Weak User",
+                 "role" => "member",
+                 "password" => "short",
+                 "password_confirmation" => "different"
+               })
+
+      assert %{password: [_ | _], password_confirmation: ["does not match password"]} =
+               errors_on(changeset)
+
+      email = unique_user_email()
+
+      assert {:error, changeset} =
+               Accounts.admin_create_user(%{
+                 "email" => email,
+                 "name" => "No Team",
+                 "role" => "member",
+                 "password" => "direct-password",
+                 "password_confirmation" => "direct-password",
+                 "team_id" => "-1"
+               })
+
+      assert %{team_id: ["does not exist"]} = errors_on(changeset)
+      refute Accounts.get_user_by_email(email)
+    end
+
+    test "rejects duplicate emails" do
+      existing = user_fixture()
+
+      assert {:error, changeset} =
+               Accounts.admin_create_user(%{
+                 "email" => existing.email,
+                 "name" => "Duplicate",
+                 "role" => "member",
+                 "password" => "direct-password",
+                 "password_confirmation" => "direct-password"
+               })
+
+      assert %{email: ["has already been taken"]} = errors_on(changeset)
+    end
+  end
+
+  describe "admin_update_user/3" do
+    test "updates name, email, and role" do
+      admin = admin_fixture()
+      user = user_fixture()
+      email = unique_user_email()
+
+      assert {:ok, updated} =
+               Accounts.admin_update_user(
+                 user,
+                 %{"name" => "Renamed", "email" => email, "role" => "admin"},
+                 admin
+               )
+
+      assert updated.name == "Renamed"
+      assert updated.email == email
+      assert updated.role == :admin
+    end
+
+    test "ignores role changes on the acting admin" do
+      admin = admin_fixture()
+
+      assert {:ok, updated} =
+               Accounts.admin_update_user(
+                 admin,
+                 %{"name" => "Still Admin", "role" => "member"},
+                 admin
+               )
+
+      assert updated.name == "Still Admin"
+      assert updated.role == :admin
+    end
+
+    test "rejects taken emails and invalid names" do
+      admin = admin_fixture()
+      user = user_fixture()
+      other = user_fixture()
+
+      assert {:error, changeset} =
+               Accounts.admin_update_user(user, %{"email" => other.email, "name" => "x"}, admin)
+
+      assert %{email: ["has already been taken"], name: [_]} = errors_on(changeset)
+    end
+
+    test "changing a pending user's email invalidates their invitation link" do
+      admin = admin_fixture()
+      invitation = invitation_fixture(admin)
+
+      assert %Invitation{} = Accounts.get_pending_invitation(invitation.user)
+
+      {:ok, user} =
+        Accounts.admin_update_user(invitation.user, %{"email" => unique_user_email()}, admin)
+
+      assert Accounts.get_pending_invitation(user) == nil
+      assert Accounts.get_invitation_by_token(invitation.token) == nil
+    end
+  end
+
+  describe "admin_set_user_password/2" do
+    test "activates a pending user and closes their invitation" do
+      invitation = invitation_fixture()
+      user = invitation.user
+
+      assert {:ok, {activated, _expired_tokens}} =
+               Accounts.admin_set_user_password(user, %{
+                 "password" => "admin-set-password",
+                 "password_confirmation" => "admin-set-password"
+               })
+
+      assert activated.confirmed_at
+      assert Accounts.get_user_by_email_and_password(user.email, "admin-set-password")
+      assert Repo.get!(Invitation, invitation.id).accepted_at
+      assert Accounts.get_invitation_by_token(invitation.token) == nil
+      assert Accounts.get_pending_invitation(activated) == nil
+    end
+
+    test "resets an active user's password and ends their sessions" do
+      user = user_fixture()
+      session_token = Accounts.generate_user_session_token(user)
+
+      assert {:ok, {_user, expired_tokens}} =
+               Accounts.admin_set_user_password(user, %{
+                 "password" => "admin-set-password",
+                 "password_confirmation" => "admin-set-password"
+               })
+
+      assert Enum.any?(expired_tokens, &(&1.token == session_token))
+      assert Accounts.get_user_by_session_token(session_token) == nil
+      refute Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+      assert Accounts.get_user_by_email_and_password(user.email, "admin-set-password")
+    end
+
+    test "keeps a pending user pending when the password is invalid" do
+      invitation = invitation_fixture()
+
+      assert {:error, changeset} =
+               Accounts.admin_set_user_password(invitation.user, %{
+                 "password" => "short",
+                 "password_confirmation" => "short"
+               })
+
+      assert %{password: [_]} = errors_on(changeset)
+      assert Accounts.get_user!(invitation.user_id).confirmed_at == nil
+      assert Accounts.get_invitation_by_token(invitation.token)
+    end
+  end
+
+  describe "get_pending_invitation/1" do
+    test "returns the latest valid invitation for pending users only" do
+      admin = admin_fixture()
+      invitation = invitation_fixture(admin)
+
+      assert Accounts.get_pending_invitation(invitation.user).id == invitation.id
+      assert Accounts.get_pending_invitation(user_fixture()) == nil
+
+      {:ok, resent, _status} =
+        Accounts.resend_user_invitation(admin, invitation.user, &"https://argus.test/#{&1}")
+
+      assert Accounts.get_pending_invitation(invitation.user).id == resent.id
+    end
+
+    test "returns nil once the invitation expired" do
+      invitation = invitation_fixture()
+
+      invitation
+      |> Ecto.Changeset.change(expires_at: DateTime.add(DateTime.utc_now(:second), -1, :second))
+      |> Repo.update!()
+
+      assert Accounts.get_pending_invitation(invitation.user) == nil
     end
   end
 end

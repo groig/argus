@@ -2,16 +2,20 @@ defmodule Argus.Accounts do
   @moduledoc """
   User lifecycle, invitation onboarding, and account changes tied to authentication.
 
-  Argus has no public signup. Users come from seeds or invitations. Invitation acceptance
-  confirms the account and sets the password. Authentication itself stays on top of
-  `phx.gen.auth`; this context adds the invitation and team rules around it.
+  Argus has no public signup. Users come from seeds, from invitations, or from an admin who
+  creates the account with a password. Invitation acceptance confirms the account and sets the
+  password. Email is optional: every invitation link can be copied from the admin panel, and
+  admins can set passwords directly. Authentication itself stays on top of `phx.gen.auth`; this
+  context adds the invitation, admin, and team rules around it.
   """
 
   import Ecto.Query, warn: false
 
   alias Ecto.Multi
   alias Argus.Accounts.{ApiToken, Invitation, User, UserNotifier, UserToken}
-  alias Argus.Repo
+  alias Argus.{Repo, Teams}
+
+  @type email_status :: :sent | :disabled | :failed
 
   def list_users do
     Repo.all(
@@ -72,6 +76,113 @@ defmodule Argus.Accounts do
   def delete_user(%User{} = user) do
     Repo.delete(user)
   end
+
+  ## Admin user management
+
+  @doc """
+  Creates an active account with a password, without sending any email.
+
+  Accepts optional `team_id` and `team_role` attrs to add the user to a team in the same
+  transaction.
+  """
+  def admin_create_user(attrs) do
+    changeset =
+      %User{}
+      |> User.registration_changeset(attrs)
+      |> User.confirm_changeset()
+
+    Multi.new()
+    |> Multi.insert(:user, changeset)
+    |> put_team_membership(attrs)
+    |> Repo.transact()
+    |> case do
+      {:ok, %{user: user}} ->
+        {:ok, user}
+
+      {:error, :user, changeset, _changes} ->
+        {:error, changeset}
+
+      {:error, :team_member, _reason, _changes} ->
+        {:error, team_error_changeset(attrs)}
+    end
+  end
+
+  def change_admin_user(%User{} = user, attrs \\ %{}, %User{} = actor) do
+    User.admin_changeset(user, attrs, lock_role: user.id == actor.id, validate_unique: false)
+  end
+
+  @doc """
+  Updates name, email, and global role on behalf of `actor`. Admins can't change their own role.
+
+  Changing a pending user's email invalidates their current invitation link, since invitation
+  tokens are bound to the address they were issued for.
+  """
+  def admin_update_user(%User{} = user, attrs, %User{} = actor) do
+    user
+    |> User.admin_changeset(attrs, lock_role: user.id == actor.id)
+    |> Repo.update()
+  end
+
+  @doc """
+  Sets a user's password from the admin panel.
+
+  Pending users become active and their open invitations are closed. Every token is deleted,
+  so existing sessions end and old invitation or reset links stop working. Returns
+  `{:ok, {user, expired_tokens}}` so callers can disconnect live sessions.
+  """
+  def admin_set_user_password(%User{} = user, attrs) do
+    changeset =
+      if user.confirmed_at do
+        User.password_changeset(user, attrs)
+      else
+        user |> User.password_changeset(attrs) |> User.confirm_changeset()
+      end
+
+    now = DateTime.utc_now(:second)
+
+    Multi.new()
+    |> Multi.all(:tokens, from(token in UserToken, where: token.user_id == ^user.id))
+    |> Multi.update(:user, changeset)
+    |> Multi.update_all(
+      :invitations,
+      from(invitation in Invitation,
+        where: invitation.user_id == ^user.id and is_nil(invitation.accepted_at)
+      ),
+      set: [accepted_at: now, updated_at: now]
+    )
+    |> Multi.delete_all(
+      :delete_tokens,
+      from(token in UserToken, where: token.user_id == ^user.id)
+    )
+    |> Repo.transact()
+    |> case do
+      {:ok, %{user: user, tokens: tokens}} -> {:ok, {user, tokens}}
+      {:error, :user, changeset, _changes} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Returns the pending user's current, still valid invitation, or nil.
+
+  Invitations keep their encoded token, so admins can copy the link again when email isn't
+  available.
+  """
+  def get_pending_invitation(%User{confirmed_at: nil} = user) do
+    Repo.one(
+      from invitation in Invitation,
+        where:
+          invitation.user_id == ^user.id and is_nil(invitation.accepted_at) and
+            invitation.email == ^user.email,
+        order_by: [desc: invitation.inserted_at, desc: invitation.id],
+        limit: 1
+    )
+    |> case do
+      %Invitation{token: token} -> get_invitation_by_token(token)
+      nil -> nil
+    end
+  end
+
+  def get_pending_invitation(%User{}), do: nil
 
   def change_user_password(user, attrs \\ %{}, opts \\ []) do
     User.password_changeset(user, attrs, opts)
@@ -232,6 +343,7 @@ defmodule Argus.Accounts do
 
     Multi.new()
     |> Multi.insert(:user, User.invited_user_changeset(%User{}, attrs))
+    |> put_team_membership(attrs)
     |> Multi.run(:token_pair, fn _repo, %{user: user} ->
       {:ok, UserToken.build_email_token(user, "invite")}
     end)
@@ -249,18 +361,13 @@ defmodule Argus.Accounts do
     |> Repo.transact()
     |> case do
       {:ok, %{invitation: invitation}} ->
-        invitation = Repo.preload(invitation, [:user, :invited_by])
-
-        UserNotifier.deliver_invitation_instructions(
-          invitation,
-          inviter,
-          invitation_url_fun.(invitation.token)
-        )
-
-        {:ok, invitation}
+        send_invitation(invitation, inviter, invitation_url_fun)
 
       {:error, :user, changeset, _changes} ->
         {:error, changeset}
+
+      {:error, :team_member, _reason, _changes} ->
+        {:error, team_error_changeset(attrs)}
 
       {:error, :invitation, changeset, _changes} ->
         {:error, changeset}
@@ -306,15 +413,7 @@ defmodule Argus.Accounts do
       |> Repo.transact()
       |> case do
         {:ok, %{invitation: invitation}} ->
-          invitation = Repo.preload(invitation, [:user, :invited_by])
-
-          UserNotifier.deliver_invitation_instructions(
-            invitation,
-            inviter,
-            invitation_url_fun.(invitation.token)
-          )
-
-          {:ok, invitation}
+          send_invitation(invitation, inviter, invitation_url_fun)
 
         {:error, :invitation, changeset, _changes} ->
           {:error, changeset}
@@ -369,6 +468,53 @@ defmodule Argus.Accounts do
         end
     end
   end
+
+  # The invitation is committed before the email goes out, so a missing or broken mailer never
+  # loses it: the admin panel shows the link either way.
+  defp send_invitation(invitation, inviter, invitation_url_fun) do
+    invitation = Repo.preload(invitation, [:user, :invited_by])
+
+    email_status =
+      invitation
+      |> UserNotifier.deliver_invitation_instructions(
+        inviter,
+        invitation_url_fun.(invitation.token)
+      )
+      |> email_status()
+
+    {:ok, invitation, email_status}
+  end
+
+  defp email_status({:ok, _email}), do: :sent
+  defp email_status({:error, :disabled}), do: :disabled
+  defp email_status({:error, _reason}), do: :failed
+
+  defp put_team_membership(multi, attrs) do
+    case attr(attrs, :team_id) do
+      blank when blank in [nil, ""] ->
+        multi
+
+      team_id ->
+        Multi.run(multi, :team_member, fn _repo, %{user: user} ->
+          case Teams.get_team(team_id) do
+            nil -> {:error, :team_not_found}
+            team -> Teams.add_member(team, user, team_role(attr(attrs, :team_role)))
+          end
+        end)
+    end
+  end
+
+  defp team_role(role) when role in [:admin, "admin"], do: :admin
+  defp team_role(_role), do: :member
+
+  defp team_error_changeset(attrs) do
+    %User{}
+    |> User.invited_user_changeset(attrs, validate_unique: false)
+    |> Ecto.Changeset.add_error(:team_id, "does not exist")
+    |> Map.put(:action, :insert)
+  end
+
+  defp attr(attrs, key), do: Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
 
   defp maybe_confirm(changeset, true), do: User.confirm_changeset(changeset)
   defp maybe_confirm(changeset, _), do: changeset

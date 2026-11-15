@@ -36,6 +36,23 @@ defmodule Argus.Accounts.User do
     |> validate_email(opts)
   end
 
+  @doc """
+  Changes made by a workspace admin from the admin panel: name, email, and global role.
+
+  Pass `lock_role: true` when admins edit themselves so they can't drop their own access.
+  """
+  def admin_changeset(user_or_changeset, attrs, opts \\ []) do
+    fields =
+      if Keyword.get(opts, :lock_role, false), do: [:email, :name], else: [:email, :name, :role]
+
+    user_or_changeset
+    |> cast(attrs, fields)
+    |> validate_required([:email, :name])
+    |> validate_name()
+    |> validate_email(opts)
+    |> validate_role()
+  end
+
   def role_changeset(user_or_changeset, attrs) do
     user_or_changeset
     |> cast(attrs, [:role])
