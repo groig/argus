@@ -38,7 +38,9 @@ Set `PHX_SERVER=true` when you start the release directly with `bin/argus start`
 
 ## Email in Production
 
-The repo ships with the local Swoosh adapter for development and the test adapter for tests. Production email needs a real adapter configured before you rely on invitation or issue emails.
+The repo ships with the local Swoosh adapter for development and the test adapter for tests. Production email needs a real adapter configured before you rely on invitation, password reset, or issue emails.
+
+Email is optional. See [Running without email](#running-without-email) for what changes when it is off.
 
 Keep two facts in mind:
 
@@ -79,6 +81,19 @@ ARGUS_SMTP_FROM_ADDRESS=alerts@example.com
 ```
 
 If you are not ready to send email yet, leave `ARGUS_SMTP_RELAY` unset and use the webhook path for issue notifications.
+
+### Running without email
+
+With `ARGUS_SMTP_RELAY` unset, Argus detects that it cannot send email (`Argus.Mailer.enabled?/0` returns `false`) and every user flow keeps working:
+
+- **Add user** in the admin panel defaults to **Set a password**, which creates an active account right away.
+- Invitations still work. After creating one, the admin panel shows the invitation link with a copy button so you can share it yourself. The link stays available in the user's **Edit user** dialog until it expires or is accepted.
+- Admins can activate pending users or reset anyone's password from **Edit user**.
+- The login page hides the self-service **Forgot your password?** link and tells users to ask an admin instead.
+
+When SMTP is configured but a message fails to send, the failure is logged, the action still completes, and the admin panel says that the email was not sent so you can share the link manually.
+
+See [User management](operations.md#user-management) for the full admin workflow.
 
 To test SMTP from a running release, use `rpc` on the live node rather than a
 one-off `eval` container. `eval` does not boot the full application tree and can
@@ -167,7 +182,7 @@ IO.puts("Created #{user.email}")
 '
 ```
 
-After the first admin exists, all other users should come through invitations from the UI.
+After the first admin exists, add everyone else from **Admin → Add user**, either with an invitation link or with a password you set. Neither option needs email.
 
 ## Starting the Release
 
@@ -357,7 +372,7 @@ IO.puts("Created #{user.email}")
 '
 ```
 
-Open the app at the configured host and log in with that admin account. After the first admin exists, create all other users through invitations in the UI.
+Open the app at the configured host and log in with that admin account. After the first admin exists, add all other users from **Admin → Add user** in the UI.
 
 For local testing without TLS, set `PHX_HOST=localhost` and open `http://localhost:4000`. For production behind a reverse proxy, set `PHX_HOST` to the public hostname that users and SDKs reach.
 
@@ -418,7 +433,7 @@ Run these checks after each deploy:
 4. Open a project logs page.
 5. Send a test event through the project DSN.
 6. Confirm the issue or log appears in the UI.
-7. If email is enabled, send an invitation and confirm delivery.
+7. If email is enabled, send an invitation and confirm delivery. Without email, add a test user with a password from the admin panel and log in as them.
 8. If the webhook is enabled, trigger a new issue and confirm a webhook `POST`.
 
 ## Health Checks

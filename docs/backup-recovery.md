@@ -185,7 +185,7 @@ After any real recovery:
 5. Confirm one log detail page renders.
 6. Send one test event through a project DSN.
 7. Confirm the event appears in the UI.
-8. If email is enabled, send an invitation.
+8. If email is enabled, send an invitation. Otherwise, add a test user with a password from the admin panel.
 9. If the webhook is enabled, confirm a webhook `POST`.
 
 ## Recovery Objectives

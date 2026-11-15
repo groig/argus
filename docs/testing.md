@@ -55,6 +55,9 @@ Examples:
 - `test/argus_web/live/logs_live/index_test.exs`
 - `test/argus_web/live/logs_live/show_test.exs`
 - `test/argus_web/live/admin_live/index_test.exs`
+- `test/argus_web/live/admin_live/add_user_test.exs`
+- `test/argus_web/live/admin_live/edit_user_test.exs`
+- `test/argus_web/live/admin_live/email_disabled_test.exs`
 - `test/argus_web/live/team_live/settings_test.exs`
 
 Focus:
@@ -64,7 +67,7 @@ Focus:
 - stacktrace/event inspection
 - issue assignment
 - logs filtering and tail mode
-- admin/team management
+- admin/team management, including user management without email
 
 ### Smoke Flows
 
@@ -132,6 +135,10 @@ Use the helpers in:
 
 If a test needs a special lifecycle state, prefer creating that state directly in the test instead of inflating the shared fixtures with unrelated defaults.
 
+### Email on and off
+
+The test mailer counts as configured, so tests exercise the email path by default. To cover a deployment without email, call `disable_email_delivery/0` from `Argus.AccountsFixtures` in the setup. It changes global config, so use it only in `async: false` modules, like `test/argus/mailer_test.exs` and `test/argus_web/live/admin_live/email_disabled_test.exs`.
+
 ## Browser-Level E2E
 
 Argus does not currently ship with Playwright or Wallaby.
@@ -151,7 +158,7 @@ Browser automation becomes worthwhile when client-side behavior or cross-browser
 The most important areas to keep covered are:
 
 1. ingestion and grouping behavior
-2. invitation-only auth and session handling
+2. admin-managed onboarding (invitation links and admin-set passwords) and session handling
 3. issue lifecycle transitions
 4. issue detail rendering
 5. project/team/admin management flows

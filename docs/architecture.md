@@ -2,7 +2,7 @@
 
 ## System Shape
 
-Argus is a Phoenix application with LiveView for the authenticated UI. Each deployment hosts one workspace. Users are invited. Teams own projects. Background delivery runs outside the ingest transaction.
+Argus is a Phoenix application with LiveView for the authenticated UI. Each deployment hosts one workspace. Admins add users. Teams own projects. Background delivery runs outside the ingest transaction.
 
 The system has four main responsibilities:
 
@@ -14,7 +14,8 @@ The system has four main responsibilities:
 Those constraints keep the data model small and keep access rules consistent across the UI.
 
 - there is one workspace per deployment
-- access is invitation-only
+- there is no public signup: admins add users through an invitation link or by setting a password
+- email is optional; no user-management flow depends on it
 - teams define ownership and visibility
 - background delivery is asynchronous and may fail independently
 
@@ -45,7 +46,7 @@ Logs stay separate because operators usually read them by time, level, or messag
 ## Context Boundaries
 
 - `Argus.Accounts`
-  - users, invitations, password/session-adjacent account actions
+  - users, invitations, admin user management, password/session-adjacent account actions
 - `Argus.Teams`
   - teams and team membership
 - `Argus.Projects`
