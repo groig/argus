@@ -77,6 +77,7 @@ defmodule ArgusWeb.Router do
     get "/projects/:slug/issues", AgentController, :issues
     get "/projects/:slug/issues/:id", AgentController, :issue
     post "/projects/:slug/issues/:id/resolve", AgentController, :resolve
+    post "/projects/:slug/issues/:id/ignore", AgentController, :ignore
     get "/projects/:slug/issues/:id/occurrences", AgentController, :occurrences
     get "/projects/:slug/issues/:id/occurrences/:occurrence_id", AgentController, :occurrence
   end
