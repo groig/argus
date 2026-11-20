@@ -15,6 +15,8 @@ defmodule Argus.Teams.TeamMember do
     team_member
     |> cast(attrs, [:user_id, :team_id, :role])
     |> validate_required([:user_id, :team_id, :role])
+    |> foreign_key_constraint(:team_id)
+    |> foreign_key_constraint(:user_id)
     |> unique_constraint([:user_id, :team_id])
   end
 end

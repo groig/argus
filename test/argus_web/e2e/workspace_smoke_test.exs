@@ -25,13 +25,20 @@ defmodule ArgusWeb.E2E.WorkspaceSmokeTest do
       |> log_in_user(admin)
       |> live(~p"/admin")
 
-    render_click(element(admin_view, "#open-invite-modal"))
+    render_click(element(admin_view, "#open-add-user-modal"))
 
     render_submit(
-      form(admin_view, "#invite-user-form", %{
-        "user" => %{"name" => "New Member", "email" => invited_email, "role" => "member"}
+      form(admin_view, "#add-user-form", %{
+        "user" => %{
+          "method" => "invite",
+          "name" => "New Member",
+          "email" => invited_email,
+          "role" => "member"
+        }
       })
     )
+
+    assert has_element?(admin_view, "#invite-result")
 
     invited_user = Accounts.get_user_by_email(invited_email)
     invitation = Repo.get_by!(Invitation, user_id: invited_user.id)

@@ -90,6 +90,55 @@ DSN shape in the UI:
 http(s)://<dsn_key>@<host>/<project_id>
 ```
 
+## User Management
+
+Global admins manage everyone in the workspace from **Admin → Users**. None of these flows need email. See [Running without email](deployment.md#running-without-email) for how they behave when SMTP is off.
+
+### Adding users
+
+**Add user** offers two ways to give someone access:
+
+- **Invitation link**: creates a pending account and an invitation link that is valid for 72 hours. The person opens it and chooses their own password. If email is configured, Argus also emails the link. Either way, the dialog shows the link with a copy button and says whether the email went out.
+- **Set a password**: creates an active account with the password you enter. The person can log in right away. Share the password with them over a secure channel. They can change it later under **Settings**.
+
+Both options take a global role (`member` or `admin`) and an optional team with a team role. The user and the team membership are created together: if the team doesn't exist, nothing is created.
+
+### Editing users
+
+**Edit user** opens a dialog that scrolls within the window. Close it with the × button, the **Close** button, or Escape. Pressing Escape while typing in a field only leaves the field, so unsaved changes aren't lost. It has these sections:
+
+- **Profile**: name, email, and global role. Nothing changes until you click **Save changes**. You can edit your own name and email, but not your own role. Changing someone's role disconnects their open pages so the new role applies right away. An admin who is demoted while the admin panel is open is sent away on their next action.
+- **Activate with a password** (pending users) or **Reset password** (active users): sets the password directly. Activating closes the user's open invitation. In both cases Argus deletes every token the user has and disconnects their open pages, and old invitation or reset links stop working. If the user changes state while the dialog is open, for example by accepting their invitation, Argus refuses the change instead of overwriting the password they just chose. You can't reset your own password here; use **Settings**.
+- **Invitation link** (pending users only): the current link with a copy button, plus **Generate new link**, which replaces the old link and emails the new one when email is configured.
+- **Team memberships** and **Add to team**: change team roles, remove the user from a team, or add them to another one.
+- **Danger zone**: delete the user together with their invitations, sessions, and team memberships. You can't delete yourself.
+
+Invitation links are bound to the email address they were issued for. Changing a pending user's email invalidates their current link, so generate a new one afterwards.
+
+### Recovering access
+
+- A user forgot their password: reset it from **Edit user**. If email is configured, they can also use **Forgot your password?** on the login page.
+- An invitation expired: open **Edit user** and click **Generate new link**, or activate the account with a password.
+- The only admin is locked out: reset their password from the release console with `rpc`, which runs on the live node. This deletes the account's sessions and disconnects pages that are already open:
+
+  ```bash
+  bin/argus rpc '
+  user = Argus.Accounts.get_user_by_email("admin@example.com")
+
+  {:ok, {_user, expired_tokens}} =
+    Argus.Accounts.reset_user_password(user, %{
+      password: "replace-this-password",
+      password_confirmation: "replace-this-password"
+    })
+
+  ArgusWeb.UserAuth.disconnect_sessions(expired_tokens)
+  '
+  ```
+
+  `reset_user_password/2` sets the password but doesn't activate a pending account. To activate one, call `Argus.Accounts.admin_set_user_password/3` instead, passing another admin's scope (`Argus.Accounts.Scope.for_user(other_admin)`) as the first argument.
+
+  To create a new admin instead, follow the first-admin steps in the [deployment guide](deployment.md).
+
 ## Notification Behavior
 
 ### Email

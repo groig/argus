@@ -20,11 +20,17 @@ defmodule ArgusWeb.AdminLive.IndexTest do
     assert has_element?(view, "#admin-users")
     refute has_element?(view, "#admin-webhook-config")
 
-    render_click(element(view, "#open-invite-modal"))
-    assert has_element?(view, "#invite-user-form")
+    render_click(element(view, "#open-add-user-modal"))
+    assert has_element?(view, "#add-user-form")
+
+    render_click(element(view, "#add-user-modal-close"))
+    refute has_element?(view, "#add-user-modal")
 
     render_click(element(view, "#open-team-modal"))
     assert has_element?(view, "#team-form")
+
+    render_click(element(view, "#team-modal-close"))
+    refute has_element?(view, "#team-modal")
   end
 
   test "renders system version details for global admins", %{conn: conn} do
@@ -40,24 +46,39 @@ defmodule ArgusWeb.AdminLive.IndexTest do
     assert has_element?(view, "#system-revision")
   end
 
-  test "updates another user's global role from the users table", %{conn: conn} do
-    admin = admin_fixture()
+  test "redirects members away from the admin panel", %{conn: conn} do
     member = user_fixture()
 
-    {:ok, view, _html} =
-      conn
-      |> log_in_user(admin)
-      |> live(~p"/admin")
+    assert {:error, {:live_redirect, %{to: "/projects"}}} =
+             conn
+             |> log_in_user(member)
+             |> live(~p"/admin")
+  end
 
-    render_click(element(view, "button[phx-value-modal='user'][phx-value-id='#{member.id}']"))
+  test "an admin demoted while the panel is open can't keep acting from it", %{conn: conn} do
+    admin = admin_fixture()
+    email = unique_user_email()
 
-    assert has_element?(view, "#user-modal")
+    {:ok, view, _html} = conn |> log_in_user(admin) |> live(~p"/admin")
+    render_click(element(view, "#open-add-user-modal"))
 
-    render_change(element(view, "#manage-user-role-form"), %{
-      "user_role" => %{"user_id" => Integer.to_string(member.id), "role" => "admin"}
-    })
+    {:ok, _demoted} = Accounts.update_user_role(admin, :member)
 
-    assert Accounts.get_user!(member.id).role == :admin
+    assert {:error, {:live_redirect, %{to: "/projects"}}} =
+             render_submit(element(view, "#add-user-form"), %{
+               "user" => %{
+                 "method" => "password",
+                 "name" => "Backdoor Admin",
+                 "email" => email,
+                 "role" => "admin",
+                 "password" => "backdoor-password",
+                 "password_confirmation" => "backdoor-password",
+                 "team_id" => "",
+                 "team_role" => "member"
+               }
+             })
+
+    refute Accounts.get_user_by_email(email)
   end
 
   test "resends a pending user's invitation from the user modal", %{conn: conn} do
@@ -79,6 +100,8 @@ defmodule ArgusWeb.AdminLive.IndexTest do
     render_click(element(view, "#resend-user-invitation-#{pending_user.id}"))
 
     assert Accounts.get_invitation_by_token(old_token) == nil
+    new_invitation = Accounts.get_pending_invitation(user_scope_fixture(admin), pending_user)
+    assert has_element?(view, "#user-invitation-copy[data-copy-value$='#{new_invitation.token}']")
 
     assert_email_sent(fn email ->
       email.subject == "You're invited to Argus" and

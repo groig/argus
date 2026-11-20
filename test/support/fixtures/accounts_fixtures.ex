@@ -49,7 +49,7 @@ defmodule Argus.AccountsFixtures do
         role: "member"
       })
 
-    {:ok, invitation} =
+    {:ok, invitation, _email_status} =
       Accounts.deliver_user_invitation(inviter, attrs, fn token ->
         "https://example.com/invitations/#{token}"
       end)
@@ -83,6 +83,17 @@ defmodule Argus.AccountsFixtures do
       })
 
     Repo.preload(user, [:team_members, :teams])
+  end
+
+  @doc """
+  Makes `Argus.Mailer.enabled?/0` return false for the rest of the test, as in a production
+  deployment without SMTP. Changes global config, so only call it from `async: false` modules.
+  """
+  def disable_email_delivery do
+    original = Application.get_env(:argus, Argus.Mailer, [])
+    Application.put_env(:argus, Argus.Mailer, Keyword.put(original, :enabled, false))
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:argus, Argus.Mailer, original) end)
+    :ok
   end
 
   def user_scope_fixture do

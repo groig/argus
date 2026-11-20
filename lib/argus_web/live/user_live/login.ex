@@ -13,7 +13,7 @@ defmodule ArgusWeb.UserLive.Login do
             <p class="text-xs uppercase tracking-[0.22em] text-zinc-500">Argus</p>
             <h1 class="text-3xl font-semibold tracking-tight text-zinc-950">Log in</h1>
             <p class="text-sm leading-6 text-zinc-500">
-              Use the invitation-issued account credentials for your team.
+              Use the account credentials your workspace admin gave you.
             </p>
           </div>
 
@@ -55,7 +55,7 @@ defmodule ArgusWeb.UserLive.Login do
             <.button class="w-full">Log in</.button>
           </.form>
 
-          <p class="text-center text-sm">
+          <p :if={@email_enabled} class="text-center text-sm">
             <.link
               id="forgot-password-link"
               navigate={~p"/reset-password"}
@@ -63,6 +63,13 @@ defmodule ArgusWeb.UserLive.Login do
             >
               Forgot your password?
             </.link>
+          </p>
+          <p
+            :if={!@email_enabled}
+            id="forgot-password-admin-hint"
+            class="text-center text-sm text-zinc-500"
+          >
+            Forgot your password? Ask a workspace admin to reset it.
           </p>
         </div>
       </section>
@@ -80,7 +87,8 @@ defmodule ArgusWeb.UserLive.Login do
     email = Phoenix.Flash.get(socket.assigns.flash, :email)
     form = to_form(%{"email" => email, "password" => "", "remember_me" => "true"}, as: :user)
 
-    {:ok, assign(socket, form: form, trigger_submit: false)}
+    {:ok,
+     assign(socket, form: form, trigger_submit: false, email_enabled: Argus.Mailer.enabled?())}
   end
 
   @impl true

@@ -35,6 +35,20 @@ defmodule Argus.Teams do
 
   def get_team!(id), do: Repo.get!(Team, id) |> Repo.preload(team_members: :user)
 
+  @doc """
+  Returns the team or nil. Accepts integer ids and their string form, as they come from forms.
+  """
+  def get_team(id) when is_integer(id), do: Repo.get(Team, id)
+
+  def get_team(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {id, ""} -> get_team(id)
+      _ -> nil
+    end
+  end
+
+  def get_team(_id), do: nil
+
   def get_team_for_user(nil, _id), do: nil
 
   def get_team_for_user(%User{role: :admin}, id),

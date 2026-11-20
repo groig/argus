@@ -2,11 +2,15 @@ defmodule ArgusWeb.AdminLive.Index do
   use ArgusWeb, :live_view
 
   alias Argus.Accounts
-  alias Argus.Accounts.User
+  alias Argus.Accounts.{Scope, User}
+  alias Argus.Mailer
   alias Argus.Projects
   alias Argus.Teams
   alias Argus.Teams.Team
   alias ArgusWeb.AppShell
+  alias ArgusWeb.UserAuth
+
+  @role_options [{"Member", "member"}, {"Admin", "admin"}]
 
   @impl true
   def render(assigns) do
@@ -17,12 +21,12 @@ defmodule ArgusWeb.AdminLive.Index do
         <:subtitle>Manage users, teams, and projects.</:subtitle>
         <:actions>
           <.button
-            id="open-invite-modal"
+            id="open-add-user-modal"
             type="button"
             phx-click="open-modal"
-            phx-value-modal="invite"
+            phx-value-modal="add-user"
           >
-            Invite user
+            <.icon name="hero-user-plus-mini" class="size-4" /> Add user
           </.button>
           <.button
             id="open-team-modal"
@@ -68,6 +72,7 @@ defmodule ArgusWeb.AdminLive.Index do
                   <.badge kind={user.role}>{user.role}</.badge>
                 </:col>
                 <:col :let={user} label="Teams">
+                  <span :if={user.team_members == []} class="text-zinc-400">No team</span>
                   {Enum.map_join(user.team_members, ", ", & &1.team.name)}
                 </:col>
                 <:col :let={user} label="Invited by">{latest_inviter_name(user)}</:col>
@@ -83,6 +88,7 @@ defmodule ArgusWeb.AdminLive.Index do
                     phx-value-modal="user"
                     phx-value-id={user.id}
                     icon="hero-cog-6-tooth-mini"
+                    id={"edit-user-#{user.id}"}
                   >
                     Edit user
                   </.action_button>
@@ -218,32 +224,180 @@ defmodule ArgusWeb.AdminLive.Index do
         </div>
       </section>
 
-      <.modal id="invite-user-modal" open={@invite_modal_open} title="Invite user">
-        <.form
-          for={@invitation_form}
-          id="invite-user-form"
-          phx-submit="invite-user"
-          class="space-y-5"
-        >
-          <.input field={@invitation_form[:name]} type="text" label="Name" required />
-          <.input field={@invitation_form[:email]} type="email" label="Email" required />
-          <.input
-            field={@invitation_form[:role]}
-            type="select"
-            label="Role"
-            options={[{"Member", "member"}, {"Admin", "admin"}]}
-          />
+      <.modal
+        id="add-user-modal"
+        open={@add_user_modal_open}
+        title="Add user"
+        size="lg"
+        on_cancel={JS.push("close-modal", value: %{modal: "add-user"})}
+      >
+        <%= if @invite_result do %>
+          <div id="invite-result" class="space-y-6">
+            <div class="flex items-start gap-3">
+              <div class={[
+                "flex size-9 shrink-0 items-center justify-center rounded-full",
+                invite_result_tone(@invite_result.email_status)
+              ]}>
+                <.icon name={invite_result_icon(@invite_result.email_status)} class="size-5" />
+              </div>
+              <div class="min-w-0">
+                <p class="font-medium text-zinc-950">
+                  {@invite_result.name} was invited
+                </p>
+                <p id="invite-result-message" class="mt-0.5 text-sm text-zinc-500">
+                  {invite_result_message(@invite_result)}
+                </p>
+              </div>
+            </div>
 
-          <div class="flex justify-end gap-3">
-            <.button type="button" variant="ghost" phx-click="close-modal" phx-value-modal="invite">
-              Cancel
-            </.button>
-            <.button>Send invitation</.button>
+            <div class="space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Invitation link
+              </p>
+              <.copy_to_clipboard
+                id="invite-result-copy"
+                value={@invite_result.url}
+                toast_message="Invitation link copied"
+              />
+              <p class="text-xs text-zinc-500">
+                Valid for 72 hours. Whoever opens it chooses the password for this account, so share it only with {@invite_result.email}.
+              </p>
+            </div>
+
+            <div class="flex justify-end gap-3">
+              <.button
+                id="add-another-user"
+                type="button"
+                variant="ghost"
+                phx-click="add-another-user"
+              >
+                Add another
+              </.button>
+              <.button
+                id="invite-result-done"
+                type="button"
+                phx-click="close-modal"
+                phx-value-modal="add-user"
+              >
+                Done
+              </.button>
+            </div>
           </div>
-        </.form>
+        <% else %>
+          <.form
+            for={@add_user_form}
+            id="add-user-form"
+            phx-change="validate-new-user"
+            phx-submit="create-user"
+            class="space-y-5"
+          >
+            <fieldset class="space-y-2">
+              <legend class="text-sm font-medium text-zinc-600">How do they get access?</legend>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <.method_option
+                  id="add-user-method-invite"
+                  value="invite"
+                  checked={@add_user_method == "invite"}
+                  icon="hero-link"
+                  title="Invitation link"
+                  description={
+                    if @email_enabled,
+                      do: "We email a link and they choose their password.",
+                      else: "You share a link and they choose their password."
+                  }
+                />
+                <.method_option
+                  id="add-user-method-password"
+                  value="password"
+                  checked={@add_user_method == "password"}
+                  icon="hero-key"
+                  title="Set a password"
+                  description="The account is active right away. No email needed."
+                />
+              </div>
+            </fieldset>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <.input field={@add_user_form[:name]} type="text" label="Name" required />
+              <.input field={@add_user_form[:email]} type="email" label="Email" required />
+            </div>
+
+            <div
+              :if={@add_user_method == "password"}
+              id="add-user-password-fields"
+              class="grid gap-4 sm:grid-cols-2"
+            >
+              <.input
+                field={@add_user_form[:password]}
+                type="password"
+                label="Password"
+                autocomplete="new-password"
+                required
+              />
+              <.input
+                field={@add_user_form[:password_confirmation]}
+                type="password"
+                label="Confirm password"
+                autocomplete="new-password"
+                required
+              />
+            </div>
+
+            <.input
+              field={@add_user_form[:role]}
+              type="select"
+              label="Global role"
+              options={@role_options}
+            />
+
+            <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              <.input
+                field={@add_user_form[:team_id]}
+                type="select"
+                label="Team"
+                prompt="No team"
+                options={team_options(@teams)}
+              />
+              <.input
+                field={@add_user_form[:team_role]}
+                type="select"
+                label="Team role"
+                options={@role_options}
+              />
+            </div>
+
+            <p
+              :if={not @email_enabled and @add_user_method == "invite"}
+              id="email-disabled-hint"
+              class="flex items-start gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              <.icon name="hero-envelope-mini" class="mt-0.5 size-4 shrink-0" />
+              Email delivery is not configured. You'll get a link to share with them yourself.
+            </p>
+
+            <div class="flex justify-end gap-3">
+              <.button
+                type="button"
+                variant="ghost"
+                phx-click="close-modal"
+                phx-value-modal="add-user"
+              >
+                Cancel
+              </.button>
+              <.button id="add-user-submit" phx-disable-with="Saving...">
+                {add_user_submit_label(@add_user_method, @email_enabled)}
+              </.button>
+            </div>
+          </.form>
+        <% end %>
       </.modal>
 
-      <.modal id="team-modal" open={@team_modal_open} title="Create team">
+      <.modal
+        id="team-modal"
+        open={@team_modal_open}
+        title="Create team"
+        on_cancel={JS.push("close-modal", value: %{modal: "team"})}
+      >
         <.form for={@team_form} id="team-form" phx-submit="create-team" class="space-y-5">
           <.input field={@team_form[:name]} type="text" label="Team name" required />
 
@@ -256,61 +410,152 @@ defmodule ArgusWeb.AdminLive.Index do
         </.form>
       </.modal>
 
-      <.modal id="user-modal" open={@user_modal_open} title="Edit user">
+      <.modal
+        id="user-modal"
+        open={@user_modal_open}
+        title="Edit user"
+        subtitle={@selected_user && @selected_user.email}
+        size="lg"
+        on_cancel={JS.push("close-modal", value: %{modal: "user"})}
+      >
         <%= if @selected_user do %>
-          <div class="space-y-6">
-            <section class="grid gap-4 sm:grid-cols-2">
-              <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-sm font-medium text-zinc-500">
-                  User
-                </p>
-                <p class="mt-2 text-sm font-medium text-zinc-950">{@selected_user.name}</p>
-                <p class="mt-1 text-sm text-zinc-500">{@selected_user.email}</p>
-              </div>
-              <div class="border border-zinc-200 bg-slate-50 px-4 py-4">
-                <p class="text-sm font-medium text-zinc-500">
-                  Status
-                </p>
-                <div class="mt-2">
-                  <.badge kind={if @selected_user.confirmed_at, do: :active, else: :pending}>
-                    {if @selected_user.confirmed_at, do: "active", else: "pending"}
-                  </.badge>
-                </div>
-              </div>
-            </section>
+          <div class="space-y-8">
+            <div id="user-status" class="flex flex-wrap items-center gap-3">
+              <.badge kind={if @selected_user.confirmed_at, do: :active, else: :pending}>
+                {if @selected_user.confirmed_at, do: "active", else: "pending"}
+              </.badge>
+              <span class="text-sm text-zinc-500">
+                {if @selected_user.confirmed_at,
+                  do: "Can log in with their password.",
+                  else: "Has not set a password yet, so they can't log in."}
+              </span>
+            </div>
 
-            <section class="space-y-3">
-              <div>
-                <h3 class="text-base font-semibold text-zinc-950">Global role</h3>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Controls full access to every team and project in Argus.
-                </p>
-              </div>
+            <section class="space-y-4">
+              <.section_heading
+                title="Profile"
+                description="Name, email, and global role. Admins have full access to every team and project."
+              />
 
               <.form
-                for={user_role_form(@selected_user)}
-                id="manage-user-role-form"
-                phx-change="update-user-role"
-                class="max-w-[14rem]"
+                for={@edit_user_form}
+                id="edit-user-form"
+                phx-change="validate-user"
+                phx-submit="save-user"
+                class="space-y-4"
               >
-                <input type="hidden" name="user_role[user_id]" value={@selected_user.id} />
-                <.input
-                  id={"manage-user-role-select-#{@selected_user.id}"}
-                  field={user_role_form(@selected_user)[:role]}
-                  type="select"
-                  options={[{"Member", "member"}, {"Admin", "admin"}]}
-                  disabled={@selected_user.id == @current_scope.user.id}
-                />
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <.input field={@edit_user_form[:name]} type="text" label="Name" required />
+                  <.input field={@edit_user_form[:email]} type="email" label="Email" required />
+                </div>
+                <div class="space-y-2 sm:max-w-[calc(50%-0.5rem)]">
+                  <.input
+                    field={@edit_user_form[:role]}
+                    type="select"
+                    label="Global role"
+                    options={@role_options}
+                    disabled={self?(@selected_user, @current_scope)}
+                  />
+                  <p :if={self?(@selected_user, @current_scope)} class="text-xs text-zinc-500">
+                    You can't change your own global role.
+                  </p>
+                </div>
+                <p :if={is_nil(@selected_user.confirmed_at)} class="text-xs text-zinc-500">
+                  Changing the email of a pending user invalidates their current invitation link.
+                </p>
+                <div class="flex justify-end">
+                  <.button id="save-user" phx-disable-with="Saving...">Save changes</.button>
+                </div>
               </.form>
             </section>
 
-            <section :if={is_nil(@selected_user.confirmed_at)} class="space-y-3">
-              <div>
-                <h3 class="text-base font-semibold text-zinc-950">Invitation</h3>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Pending users can receive a fresh invitation email with a new token.
-                </p>
-              </div>
+            <section
+              :if={not self?(@selected_user, @current_scope)}
+              id="user-password"
+              class="space-y-4 border-t border-zinc-200 pt-6"
+            >
+              <.section_heading
+                title={
+                  if @selected_user.confirmed_at,
+                    do: "Reset password",
+                    else: "Activate with a password"
+                }
+                description={
+                  if @selected_user.confirmed_at,
+                    do: "Set a new password for them. They will be signed out on every device.",
+                    else:
+                      "Set a password to activate the account without email. Share it with them securely."
+                }
+              />
+
+              <.form
+                for={@password_form}
+                id="set-user-password-form"
+                phx-submit="set-user-password"
+                class="grid gap-4 sm:grid-cols-2"
+              >
+                <input
+                  type="hidden"
+                  name="user_password[expected_state]"
+                  value={if @selected_user.confirmed_at, do: "active", else: "pending"}
+                />
+                <.input
+                  field={@password_form[:password]}
+                  type="password"
+                  label="New password"
+                  autocomplete="new-password"
+                  required
+                />
+                <.input
+                  field={@password_form[:password_confirmation]}
+                  type="password"
+                  label="Confirm password"
+                  autocomplete="new-password"
+                  required
+                />
+                <div class="flex justify-end sm:col-span-2">
+                  <.button
+                    id="set-user-password-submit"
+                    variant="secondary"
+                    phx-disable-with="Saving..."
+                  >
+                    {if @selected_user.confirmed_at,
+                      do: "Reset password",
+                      else: "Set password & activate"}
+                  </.button>
+                </div>
+              </.form>
+            </section>
+
+            <section
+              :if={is_nil(@selected_user.confirmed_at)}
+              id="user-invitation"
+              class="space-y-4 border-t border-zinc-200 pt-6"
+            >
+              <.section_heading
+                title="Invitation link"
+                description="Or let them choose their own password: share this link."
+              />
+
+              <%= if @pending_invitation do %>
+                <div class="space-y-2">
+                  <.copy_to_clipboard
+                    id="user-invitation-copy"
+                    value={invitation_url(@pending_invitation)}
+                    toast_message="Invitation link copied"
+                  />
+                  <p class="text-xs text-zinc-500">
+                    Expires {format_datetime(@pending_invitation.expires_at)}.
+                  </p>
+                </div>
+              <% else %>
+                <div
+                  id="user-invitation-missing"
+                  class="border border-dashed border-zinc-300 px-4 py-4 text-sm text-zinc-500"
+                >
+                  No active link. It expired or the email changed. Generate a new one.
+                </div>
+              <% end %>
 
               <div class="flex flex-wrap gap-3">
                 <.button
@@ -320,18 +565,17 @@ defmodule ArgusWeb.AdminLive.Index do
                   phx-click="resend-user-invitation"
                   phx-value-id={@selected_user.id}
                 >
-                  Resend invitation
+                  <.icon name="hero-arrow-path-mini" class="size-4" />
+                  {if @email_enabled, do: "Generate and email new link", else: "Generate new link"}
                 </.button>
               </div>
             </section>
 
-            <section class="space-y-3">
-              <div>
-                <h3 class="text-base font-semibold text-zinc-950">Team memberships</h3>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Add this user to teams, adjust their team role, or remove access.
-                </p>
-              </div>
+            <section class="space-y-3 border-t border-zinc-200 pt-6">
+              <.section_heading
+                title="Team memberships"
+                description="Add this user to teams, adjust their team role, or remove access."
+              />
 
               <%= if @selected_user.team_members == [] do %>
                 <div class="border border-dashed border-zinc-300 px-4 py-6 text-sm text-zinc-500">
@@ -341,7 +585,8 @@ defmodule ArgusWeb.AdminLive.Index do
                 <div class="space-y-3">
                   <div
                     :for={team_member <- @selected_user.team_members}
-                    class="flex flex-col gap-4 border border-zinc-200 px-4 py-4 lg:flex-row lg:items-center lg:justify-between"
+                    id={"user-team-member-#{team_member.id}"}
+                    class="flex flex-col gap-4 border border-zinc-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div>
                       <p class="text-sm font-medium text-zinc-950">{team_member.team.name}</p>
@@ -363,12 +608,13 @@ defmodule ArgusWeb.AdminLive.Index do
                           id={"user-team-role-select-#{team_member.id}"}
                           field={user_team_role_form(team_member)[:role]}
                           type="select"
-                          options={[{"Member", "member"}, {"Admin", "admin"}]}
+                          options={@role_options}
                           class="max-w-[9rem]"
                         />
                       </.form>
 
                       <.action_button
+                        id={"remove-user-team-member-#{team_member.id}"}
                         type="button"
                         phx-click="remove-user-team-membership"
                         phx-value-id={team_member.id}
@@ -384,12 +630,10 @@ defmodule ArgusWeb.AdminLive.Index do
             </section>
 
             <section :if={available_team_options(@selected_user, @teams) != []} class="space-y-3">
-              <div>
-                <h3 class="text-base font-semibold text-zinc-950">Add to team</h3>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Assign this user to another team without leaving the users tab.
-                </p>
-              </div>
+              <.section_heading
+                title="Add to team"
+                description="Assign this user to another team without leaving the users tab."
+              />
 
               <.form
                 for={@user_team_form}
@@ -407,7 +651,7 @@ defmodule ArgusWeb.AdminLive.Index do
                   field={@user_team_form[:role]}
                   type="select"
                   label="Role"
-                  options={[{"Member", "member"}, {"Admin", "admin"}]}
+                  options={@role_options}
                 />
                 <div class="flex items-end">
                   <.button variant="secondary">Add membership</.button>
@@ -416,15 +660,13 @@ defmodule ArgusWeb.AdminLive.Index do
             </section>
 
             <section
-              :if={@selected_user.id != @current_scope.user.id}
+              :if={not self?(@selected_user, @current_scope)}
               class="space-y-3 border-t border-zinc-200 pt-6"
             >
-              <div>
-                <h3 class="text-base font-semibold text-zinc-950">Danger zone</h3>
-                <p class="mt-1 text-sm text-zinc-500">
-                  Delete this user and remove their invitations, sessions, and team memberships.
-                </p>
-              </div>
+              <.section_heading
+                title="Danger zone"
+                description="Delete this user and remove their invitations, sessions, and team memberships."
+              />
 
               <div class="flex flex-wrap gap-3">
                 <.button
@@ -442,7 +684,13 @@ defmodule ArgusWeb.AdminLive.Index do
         <% end %>
 
         <:actions>
-          <.button type="button" variant="ghost" phx-click="close-modal" phx-value-modal="user">
+          <.button
+            id="user-modal-done"
+            type="button"
+            variant="ghost"
+            phx-click="close-modal"
+            phx-value-modal="user"
+          >
             Close
           </.button>
         </:actions>
@@ -451,22 +699,100 @@ defmodule ArgusWeb.AdminLive.Index do
     """
   end
 
+  attr :id, :string, required: true
+  attr :value, :string, required: true
+  attr :checked, :boolean, default: false
+  attr :icon, :string, required: true
+  attr :title, :string, required: true
+  attr :description, :string, required: true
+
+  defp method_option(assigns) do
+    ~H"""
+    <label
+      for={@id}
+      class={[
+        "group flex cursor-pointer items-start gap-3 rounded-sm border px-4 py-3 transition duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-sky-500",
+        if(@checked,
+          do: "border-sky-500 bg-sky-50/70 ring-2 ring-sky-500/15",
+          else: "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
+        )
+      ]}
+    >
+      <input
+        id={@id}
+        type="radio"
+        name="user[method]"
+        value={@value}
+        checked={@checked}
+        class="sr-only"
+      />
+      <.icon
+        name={@icon}
+        class={[
+          "mt-0.5 size-5 shrink-0 transition",
+          if(@checked, do: "text-sky-600", else: "text-zinc-400 group-hover:text-zinc-500")
+        ]}
+      />
+      <span>
+        <span class="block text-sm font-medium text-zinc-950">{@title}</span>
+        <span class="mt-0.5 block text-xs leading-5 text-zinc-500">{@description}</span>
+      </span>
+    </label>
+    """
+  end
+
+  attr :title, :string, required: true
+  attr :description, :string, required: true
+
+  defp section_heading(assigns) do
+    ~H"""
+    <div>
+      <h3 class="text-base font-semibold text-zinc-950">{@title}</h3>
+      <p class="mt-1 text-sm text-zinc-500">{@description}</p>
+    </div>
+    """
+  end
+
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
 
     if user.role != :admin do
-      {:ok, push_navigate(socket, to: ArgusWeb.UserAuth.signed_in_path(user))}
+      {:ok, push_navigate(socket, to: UserAuth.signed_in_path(user))}
     else
       {:ok,
        socket
        |> assign(:sidebar, AppShell.build(user, section: :admin))
-       |> assign(:invite_modal_open, false)
+       |> assign(:role_options, @role_options)
+       |> assign(:email_enabled, Mailer.enabled?())
+       |> assign(:add_user_modal_open, false)
        |> assign(:team_modal_open, false)
        |> assign(:user_modal_open, false)
        |> assign(:selected_user_id, nil)
+       |> attach_hook(:require_current_admin, :handle_event, &require_current_admin/3)
        |> assign_forms()
        |> load_data()}
+    end
+  end
+
+  # The socket's scope is loaded once at mount. Re-check the caller before every event so an
+  # admin who was demoted or deleted in the meantime can't keep acting from an open tab.
+  defp require_current_admin(_event, _params, socket) do
+    %Scope{user: current_user} = scope = socket.assigns.current_scope
+
+    case Accounts.get_user(current_user.id) do
+      %User{role: :admin} = user ->
+        user = %{user | authenticated_at: current_user.authenticated_at}
+        {:cont, assign(socket, :current_scope, %{scope | user: user})}
+
+      %User{} = user ->
+        {:halt,
+         socket
+         |> put_flash(:error, "You no longer have admin access.")
+         |> push_navigate(to: UserAuth.signed_in_path(user))}
+
+      nil ->
+        {:halt, redirect(socket, to: ~p"/login")}
     end
   end
 
@@ -476,8 +802,8 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   @impl true
-  def handle_event("open-modal", %{"modal" => "invite"}, socket) do
-    {:noreply, assign(socket, :invite_modal_open, true)}
+  def handle_event("open-modal", %{"modal" => "add-user"}, socket) do
+    {:noreply, socket |> reset_add_user() |> assign(:add_user_modal_open, true)}
   end
 
   def handle_event("open-modal", %{"modal" => "team"}, socket) do
@@ -485,15 +811,25 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   def handle_event("open-modal", %{"modal" => "user", "id" => user_id}, socket) do
-    {:noreply,
-     socket
-     |> assign(:selected_user_id, String.to_integer(user_id))
-     |> assign(:user_modal_open, true)
-     |> load_data()}
+    socket =
+      socket
+      |> assign(:selected_user_id, String.to_integer(user_id))
+      |> load_data()
+
+    case socket.assigns.selected_user do
+      nil ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      user ->
+        {:noreply,
+         socket
+         |> assign_user_forms(user)
+         |> assign(:user_modal_open, true)}
+    end
   end
 
-  def handle_event("close-modal", %{"modal" => "invite"}, socket) do
-    {:noreply, assign(socket, :invite_modal_open, false)}
+  def handle_event("close-modal", %{"modal" => "add-user"}, socket) do
+    {:noreply, socket |> assign(:add_user_modal_open, false) |> reset_add_user()}
   end
 
   def handle_event("close-modal", %{"modal" => "team"}, socket) do
@@ -501,28 +837,30 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   def handle_event("close-modal", %{"modal" => "user"}, socket) do
-    {:noreply, assign(socket, :user_modal_open, false)}
+    {:noreply,
+     socket
+     |> assign(:user_modal_open, false)
+     |> assign(:selected_user_id, nil)
+     |> assign(:selected_user, nil)}
   end
 
-  def handle_event("invite-user", %{"user" => params}, socket) do
-    inviter = socket.assigns.current_scope.user
+  def handle_event("add-another-user", _params, socket) do
+    {:noreply, reset_add_user(socket)}
+  end
 
-    case Accounts.deliver_user_invitation(inviter, params, fn token ->
-           url(~p"/invitations/#{token}")
-         end) do
-      {:ok, _invitation} ->
-        {:noreply,
-         socket
-         |> assign(:invite_modal_open, false)
-         |> assign_forms()
-         |> load_data()
-         |> put_flash(:info, "Invitation sent.")}
+  def handle_event("validate-new-user", %{"user" => params}, socket) do
+    method = normalize_method(params["method"])
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> assign(:invite_modal_open, true)
-         |> assign(:invitation_form, to_form(changeset, as: :user))}
+    {:noreply,
+     socket
+     |> assign(:add_user_method, method)
+     |> assign(:add_user_form, add_user_form(params, method, :validate))}
+  end
+
+  def handle_event("create-user", %{"user" => params}, socket) do
+    case normalize_method(params["method"]) do
+      "password" -> create_user_with_password(socket, params)
+      "invite" -> invite_user(socket, params)
     end
   end
 
@@ -534,17 +872,16 @@ defmodule ArgusWeb.AdminLive.Index do
         {:noreply, put_flash(socket, :error, "User not found.")}
 
       user ->
-        case Accounts.resend_user_invitation(inviter, user, fn token ->
-               url(~p"/invitations/#{token}")
-             end) do
-          {:ok, _invitation} ->
-            {:noreply, socket |> load_data() |> put_flash(:info, "Invitation resent.")}
+        case Accounts.resend_user_invitation(inviter, user, &url(~p"/invitations/#{&1}")) do
+          {:ok, _invitation, email_status} ->
+            {kind, message} = resend_flash(email_status)
+            {:noreply, socket |> load_data() |> put_flash(kind, message)}
 
           {:error, :already_active} ->
             {:noreply, put_flash(socket, :error, "Only pending users can be reinvited.")}
 
           {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Could not resend the invitation.")}
+            {:noreply, put_flash(socket, :error, "Could not generate a new invitation link.")}
         end
     end
   end
@@ -567,23 +904,89 @@ defmodule ArgusWeb.AdminLive.Index do
     end
   end
 
-  def handle_event(
-        "update-user-role",
-        %{"user_role" => %{"user_id" => user_id, "role" => role}},
-        socket
-      ) do
-    user_id = String.to_integer(user_id)
+  def handle_event("validate-user", %{"edit_user" => params}, socket) do
+    case socket.assigns.selected_user do
+      nil ->
+        {:noreply, socket}
 
-    cond do
-      user_id == socket.assigns.current_scope.user.id ->
-        {:noreply, put_flash(socket, :error, "You cannot change your own global role here.")}
+      user ->
+        form =
+          socket.assigns.current_scope
+          |> Accounts.change_admin_user(user, params)
+          |> Map.put(:action, :validate)
+          |> to_form(as: :edit_user)
 
-      user = Enum.find(socket.assigns.users, &(&1.id == user_id)) ->
-        {:ok, _user} = Accounts.update_user_role(user, String.to_existing_atom(role))
-        {:noreply, socket |> load_data() |> put_flash(:info, "User role updated.")}
+        {:noreply, assign(socket, :edit_user_form, form)}
+    end
+  end
 
-      true ->
-        {:noreply, put_flash(socket, :error, "User not found.")}
+  def handle_event("save-user", %{"edit_user" => params}, socket) do
+    with {:ok, user} <- fetch_selected_user(socket),
+         {:ok, updated_user} <-
+           Accounts.admin_update_user(socket.assigns.current_scope, user, params) do
+      if updated_user.role != user.role do
+        # Live sessions reconnect and pick up the new role on mount.
+        updated_user |> Accounts.list_user_session_tokens() |> UserAuth.disconnect_sessions()
+      end
+
+      {:noreply,
+       socket
+       |> load_data()
+       |> assign(:edit_user_form, edit_user_form(updated_user, socket))
+       |> put_flash(:info, "User updated.")}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if Keyword.has_key?(changeset.errors, :id) do
+          {:noreply, user_gone(socket)}
+        else
+          {:noreply, assign(socket, :edit_user_form, to_form(changeset, as: :edit_user))}
+        end
+
+      error ->
+        {:noreply, handle_user_error(socket, error)}
+    end
+  end
+
+  def handle_event("set-user-password", %{"user_password" => params}, socket) do
+    with {:ok, user} <- fetch_selected_user(socket),
+         :ok <- check_expected_state(user, params["expected_state"]),
+         {:ok, {_user, expired_tokens}} <-
+           Accounts.admin_set_user_password(socket.assigns.current_scope, user, params) do
+      UserAuth.disconnect_sessions(expired_tokens)
+
+      message =
+        if user.confirmed_at,
+          do: "Password reset. They were signed out everywhere.",
+          else: "Password set. The account is active."
+
+      {:noreply,
+       socket
+       |> load_data()
+       |> assign(:password_form, password_form())
+       |> put_flash(:info, message)}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if Keyword.has_key?(changeset.errors, :id) do
+          {:noreply, user_gone(socket)}
+        else
+          {:noreply, assign(socket, :password_form, to_form(changeset, as: :user_password))}
+        end
+
+      {:error, :state_changed} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> assign(:password_form, password_form())
+         |> put_flash(
+           :error,
+           "This user just activated their account. Nothing was changed; review and try again."
+         )}
+
+      {:error, :self} ->
+        {:noreply, put_flash(socket, :error, "Change your own password from your settings.")}
+
+      error ->
+        {:noreply, handle_user_error(socket, error)}
     end
   end
 
@@ -619,7 +1022,7 @@ defmodule ArgusWeb.AdminLive.Index do
         socket
       ) do
     with %User{} = user <- socket.assigns.selected_user,
-         %{} = team <- Teams.get_team!(String.to_integer(team_id)),
+         %Team{} = team <- Teams.get_team(team_id),
          {:ok, _membership} <- Teams.add_member(team, user, String.to_existing_atom(role)) do
       {:noreply, socket |> load_data() |> put_flash(:info, "Team membership added.")}
     else
@@ -635,7 +1038,8 @@ defmodule ArgusWeb.AdminLive.Index do
         {:noreply, put_flash(socket, :error, "You cannot delete your own account here.")}
 
       user = Enum.find(socket.assigns.users, &(&1.id == user_id)) ->
-        {:ok, _user} = Accounts.delete_user(user)
+        # Deleting a user who is already gone is fine: the outcome is the same.
+        _ = Accounts.delete_user(user)
 
         {:noreply,
          socket
@@ -649,17 +1053,128 @@ defmodule ArgusWeb.AdminLive.Index do
     end
   end
 
-  defp assign_forms(socket) do
-    invitation_form =
-      %User{}
-      |> User.invited_user_changeset(%{"role" => "member"}, validate_unique: false)
-      |> to_form(as: :user)
+  defp create_user_with_password(socket, params) do
+    case Accounts.admin_create_user(socket.assigns.current_scope, params) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:add_user_modal_open, false)
+         |> reset_add_user()
+         |> load_data()
+         |> put_flash(:info, "#{user.name} was added and can log in now.")}
 
-    team_form = to_form(Team.changeset(%Team{}, %{}), as: :team)
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply,
+         socket
+         |> assign(:add_user_method, "password")
+         |> assign(:add_user_form, to_form(changeset, as: :user))}
+
+      error ->
+        {:noreply, handle_user_error(socket, error)}
+    end
+  end
+
+  # Reloads the user shown in the edit dialog, since another admin may have changed or deleted
+  # them since the dialog opened.
+  defp fetch_selected_user(socket) do
+    case socket.assigns.selected_user && Accounts.get_user(socket.assigns.selected_user.id) do
+      %User{} = user -> {:ok, user}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  # The password form says whether it was meant to activate or to reset. If the user accepted
+  # their invitation meanwhile, don't silently replace the password they just chose.
+  defp check_expected_state(%User{confirmed_at: nil}, "pending"), do: :ok
+  defp check_expected_state(%User{confirmed_at: %DateTime{}}, "active"), do: :ok
+  defp check_expected_state(_user, _expected_state), do: {:error, :state_changed}
+
+  defp handle_user_error(socket, {:error, :not_found}), do: user_gone(socket)
+
+  defp handle_user_error(socket, {:error, :unauthorized}),
+    do: put_flash(socket, :error, "You no longer have admin access.")
+
+  defp user_gone(socket) do
+    socket
+    |> assign(:user_modal_open, false)
+    |> assign(:selected_user_id, nil)
+    |> load_data()
+    |> put_flash(:error, "This user no longer exists.")
+  end
+
+  defp invite_user(socket, params) do
+    inviter = socket.assigns.current_scope.user
+
+    case Accounts.deliver_user_invitation(inviter, params, &url(~p"/invitations/#{&1}")) do
+      {:ok, invitation, email_status} ->
+        {:noreply,
+         socket
+         |> assign(:invite_result, %{
+           name: invitation.user.name,
+           email: invitation.email,
+           url: invitation_url(invitation),
+           email_status: email_status
+         })
+         |> load_data()}
+
+      {:error, changeset} ->
+        {:noreply,
+         socket
+         |> assign(:add_user_method, "invite")
+         |> assign(:add_user_form, to_form(changeset, as: :user))}
+    end
+  end
+
+  defp assign_forms(socket) do
+    socket
+    |> reset_add_user()
+    |> assign(:team_form, to_form(Team.changeset(%Team{}, %{}), as: :team))
+  end
+
+  defp reset_add_user(socket) do
+    method = if socket.assigns.email_enabled, do: "invite", else: "password"
 
     socket
-    |> assign(:invitation_form, invitation_form)
-    |> assign(:team_form, team_form)
+    |> assign(:invite_result, nil)
+    |> assign(:add_user_method, method)
+    |> assign(
+      :add_user_form,
+      add_user_form(
+        %{"role" => "member", "method" => method, "team_id" => "", "team_role" => "member"},
+        method,
+        nil
+      )
+    )
+  end
+
+  # Validation only: the password is checked but not hashed until the user is created.
+  defp add_user_form(params, method, action) do
+    changeset = User.invited_user_changeset(%User{}, params, validate_unique: false)
+
+    changeset =
+      if method == "password",
+        do: User.password_changeset(changeset, params, hash_password: false),
+        else: changeset
+
+    changeset
+    |> Map.put(:action, action)
+    |> to_form(as: :user)
+  end
+
+  defp assign_user_forms(socket, user) do
+    socket
+    |> assign(:edit_user_form, edit_user_form(user, socket))
+    |> assign(:password_form, password_form())
+  end
+
+  defp edit_user_form(user, socket) do
+    user
+    |> then(&Accounts.change_admin_user(socket.assigns.current_scope, &1))
+    |> to_form(as: :edit_user)
+  end
+
+  defp password_form do
+    to_form(%{"password" => "", "password_confirmation" => ""}, as: :user_password)
   end
 
   defp load_data(socket) do
@@ -675,6 +1190,11 @@ defmodule ArgusWeb.AdminLive.Index do
     |> assign(:users, users)
     |> assign(:teams, teams)
     |> assign(:selected_user, selected_user)
+    |> assign(
+      :pending_invitation,
+      selected_user &&
+        Accounts.get_pending_invitation(socket.assigns.current_scope, selected_user)
+    )
     |> assign(:user_team_form, user_team_form(selected_user, teams))
     |> assign(:projects, projects)
     |> assign(:project_stats, project_stats)
@@ -685,6 +1205,45 @@ defmodule ArgusWeb.AdminLive.Index do
     )
     |> assign(:team_unresolved_counts, team_unresolved_counts(projects, project_stats))
   end
+
+  defp normalize_method("password"), do: "password"
+  defp normalize_method(_method), do: "invite"
+
+  defp self?(%User{id: id}, %{user: %User{id: id}}), do: true
+  defp self?(_user, _scope), do: false
+
+  defp team_options(teams), do: Enum.map(teams, &{&1.name, Integer.to_string(&1.id)})
+
+  defp invitation_url(invitation), do: url(~p"/invitations/#{invitation.token}")
+
+  defp format_datetime(datetime), do: Calendar.strftime(datetime, "%b %-d, %Y at %H:%M UTC")
+
+  defp add_user_submit_label("password", _email_enabled), do: "Create user"
+  defp add_user_submit_label(_invite, true), do: "Send invitation"
+  defp add_user_submit_label(_invite, false), do: "Create invitation link"
+
+  defp invite_result_message(%{email_status: :sent, email: email}),
+    do: "We emailed the invitation to #{email}. You can also share the link below."
+
+  defp invite_result_message(%{email_status: :disabled}),
+    do: "Email delivery is not configured. Copy the link below and share it with them."
+
+  defp invite_result_message(%{email_status: :failed}),
+    do: "The invitation email could not be sent. Copy the link below and share it with them."
+
+  defp invite_result_tone(:sent), do: "bg-emerald-50 text-emerald-600"
+  defp invite_result_tone(:disabled), do: "bg-sky-50 text-sky-600"
+  defp invite_result_tone(:failed), do: "bg-amber-50 text-amber-600"
+
+  defp invite_result_icon(:sent), do: "hero-envelope"
+  defp invite_result_icon(:disabled), do: "hero-link"
+  defp invite_result_icon(:failed), do: "hero-exclamation-triangle"
+
+  defp resend_flash(:sent), do: {:info, "A new invitation link was emailed."}
+  defp resend_flash(:disabled), do: {:info, "New invitation link ready to copy."}
+
+  defp resend_flash(:failed),
+    do: {:error, "New invitation link ready, but the email could not be sent. Copy it instead."}
 
   defp latest_inviter_name(user) do
     user.received_invitations
@@ -703,10 +1262,6 @@ defmodule ArgusWeb.AdminLive.Index do
       app: Application.spec(:argus, :vsn) |> to_string(),
       revision: System.get_env("ARGUS_REVISION", "unknown")
     }
-  end
-
-  defp user_role_form(user) do
-    to_form(%{"user_id" => user.id, "role" => to_string(user.role)}, as: :user_role)
   end
 
   defp user_team_role_form(team_member) do
@@ -732,15 +1287,11 @@ defmodule ArgusWeb.AdminLive.Index do
   end
 
   defp available_team_options(user, teams) do
-    assigned_team_ids = MapSet.new(Enum.map(user.team_members, & &1.team_id))
+    assigned_team_ids = MapSet.new(user.team_members, & &1.team_id)
 
-    Enum.reduce(teams, [], fn team, acc ->
-      if MapSet.member?(assigned_team_ids, team.id) do
-        acc
-      else
-        acc ++ [{team.name, Integer.to_string(team.id)}]
-      end
-    end)
+    teams
+    |> Enum.reject(&MapSet.member?(assigned_team_ids, &1.id))
+    |> team_options()
   end
 
   defp selected_user(_users, nil), do: nil

@@ -2,7 +2,7 @@
 
 Argus is a self-hosted error tracker and log ingester built with Elixir, Phoenix, and LiveView. It accepts Sentry-compatible payloads, groups errors into issues, stores raw events and logs, and exposes an internal UI for triage, project management, and access control.
 
-Each deployment hosts one internal workspace. Admins invite users, teams own projects, LiveView powers the UI, and notification delivery runs after the main write path so ingest stays responsive.
+Each deployment hosts one internal workspace. Admins add users, by invitation link or with a password they set, teams own projects, LiveView powers the UI, and notification delivery runs after the main write path so ingest stays responsive.
 
 ## Screenshots
 
@@ -66,6 +66,7 @@ The project DSN key is printed to stdout when the seeds run.
 - separate log storage with live tail support
 - Sentry metrics ingestion with charts and raw metric point inspection
 - users, teams, projects, invitations, and issue assignment
+- admin user management that works without email: shareable invitation links, admin-set passwords, team assignment on creation
 - email notifications and optional webhooks for issue lifecycle and manual action events
 - Markdown API for coding agents, with personal API tokens: read, resolve, and ignore issues
 

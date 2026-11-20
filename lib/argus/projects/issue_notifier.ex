@@ -99,16 +99,13 @@ defmodule Argus.Projects.IssueNotifier do
     project_webhook(issue.project) && match?({Req.Test, _stub}, Keyword.get(req_options(), :plug))
   end
 
+  # Failures are logged by `Mailer.try_deliver/1` and never stop the webhook that follows.
   defp deliver_emails(%ErrorEvent{} = issue, event, opts) do
-    Enum.each(recipients(issue, event), fn recipient ->
-      case issue_email(issue, recipient, event, opts) |> Mailer.deliver() do
-        {:ok, _metadata} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning("failed to send issue notification email: #{inspect(reason)}")
-      end
-    end)
+    if Mailer.enabled?() do
+      Enum.each(recipients(issue, event), fn recipient ->
+        issue |> issue_email(recipient, event, opts) |> Mailer.try_deliver()
+      end)
+    end
 
     issue
   end

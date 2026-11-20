@@ -4,6 +4,8 @@ defmodule Argus.Accounts.UserNotifier do
   alias Argus.Mailer
   alias Argus.Accounts.{Invitation, User}
 
+  # Returns `{:ok, email}`, `{:error, :disabled}` when no mailer is configured, or
+  # `{:error, reason}` when delivery fails. See `Argus.Mailer.try_deliver/1`.
   defp deliver(recipient, subject, text_body, html_body) do
     email =
       new()
@@ -13,7 +15,7 @@ defmodule Argus.Accounts.UserNotifier do
       |> text_body(text_body)
       |> html_body(html_body)
 
-    with {:ok, _metadata} <- Mailer.deliver(email) do
+    with {:ok, _metadata} <- Mailer.try_deliver(email) do
       {:ok, email}
     end
   end
